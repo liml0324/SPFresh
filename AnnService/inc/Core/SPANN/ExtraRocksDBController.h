@@ -82,6 +82,46 @@ namespace SPTAG::SPANN
             return Get(Helper::Convert::Serialize<SizeType>(&key), value);
         }
 
+        ErrorCode MultiGet(const std::vector<std::string>& keys, std::vector<std::string>* values) {
+            size_t num_keys = keys.size();
+
+            rocksdb::Slice* slice_keys = new rocksdb::Slice[num_keys];
+            rocksdb::PinnableSlice* slice_values = new rocksdb::PinnableSlice[num_keys];
+            rocksdb::Status* statuses = new rocksdb::Status[num_keys];
+
+            for (int i = 0; i < num_keys; i++) {
+                slice_keys[i] = rocksdb::Slice(keys[i]);
+            }
+
+            db->MultiGet(rocksdb::ReadOptions(), db->DefaultColumnFamily(),
+                            num_keys, slice_keys, slice_values, statuses);
+
+            for (int i = 0; i < num_keys; i++) {
+                if (statuses[i] != rocksdb::Status::OK()) {
+                    delete [] slice_keys;
+                    delete [] slice_values;
+                    delete [] statuses;
+                    return ErrorCode::Fail;
+                }
+                values->push_back(slice_values[i].ToString());
+            }
+
+            delete [] slice_keys;
+            delete [] slice_values;
+            delete [] statuses;
+            return ErrorCode::Success;
+        }
+
+        ErrorCode MultiGet(const std::vector<SizeType>& keys, std::vector<std::string>* values) {
+            std::vector<std::string> str_keys;
+
+            for (const auto &key : keys) {
+                str_keys.push_back(Helper::Convert::Serialize<SizeType>(&key));
+            }
+
+            return MultiGet(str_keys, values);
+        }
+
         ErrorCode Put(const std::string& key, const std::string& value) override {
             auto s = db->Put(rocksdb::WriteOptions(), key, value);
             if (s == rocksdb::Status::OK()) {
@@ -191,9 +231,9 @@ namespace SPTAG::SPANN
                 std::shared_ptr<VectorIndex> p_index,
                 SearchStats* p_stats, const COMMON::VersionLabel& m_versionMap, std::set<int>* truth, std::map<int, std::set<int>>* found) override
             {
-                auto exStart = std::chrono::high_resolution_clock::now();
+            auto exStart = std::chrono::high_resolution_clock::now();
 
-                const auto postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
+            const auto postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
 
             p_exWorkSpace->m_deduper.clear();
 
@@ -206,20 +246,22 @@ namespace SPTAG::SPANN
             double compLatency = 0;
             double readLatency = 0;
 
-            for (uint32_t pi = 0; pi < postingListCount; ++pi)
-            {
+            std::vector<std::string> postingLists;
+
+            auto readStart = std::chrono::high_resolution_clock::now();
+            db.MultiGet(p_exWorkSpace->m_postingIDs, &postingLists);
+            auto readEnd = std::chrono::high_resolution_clock::now();
+
+            diskIO++;
+
+            readLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(readEnd - readStart).count());
+
+            for (uint32_t pi = 0; pi < postingListCount; ++pi) {
                 auto curPostingID = p_exWorkSpace->m_postingIDs[pi];
-                std::string postingList;
-
-                auto readStart = std::chrono::high_resolution_clock::now();
-                SearchIndex(curPostingID, postingList);
-                auto readEnd = std::chrono::high_resolution_clock::now();
-
-                readLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(readEnd - readStart).count());
+                std::string &postingList = postingLists[pi];
 
                 int vectorNum = postingList.size() / m_vectorInfoSize;
 
-                diskIO++;
                 diskRead += postingList.size();
                 listElements += vectorNum;
 
