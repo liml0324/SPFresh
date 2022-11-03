@@ -563,8 +563,12 @@ namespace SPTAG {
 
                 ShowMemoryStatus(vectorSet);
 
-                int batch = insertCount / step;
-                // int batch = 5;
+                int batch;
+                if (step == 0) {
+                    batch = 0;
+                } else {
+                    batch = insertCount / step;
+                }
                 
                 int finishedInsert = 0;
                 int insertThreads = p_opts.m_insertThreadNum;
@@ -612,9 +616,15 @@ namespace SPTAG {
                     step/ sendingCost,
                     static_cast<uint32_t>(step));
 
+                    int waited = 0;
+                    LOG(Helper::LogLevel::LL_Info,"During Update\n");
+                    ShowMemoryStatus(vectorSet);
                     while(!p_index->AllFinishedExceptReassign())
                     {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+                        // LOG(Helper::LogLevel::LL_Info,"Waitting\n");
+                        waited += 10;
+                        if (waited % 100000 == 0) ShowMemoryStatus(vectorSet);
                     }
                     double appendSyncingCost = sw.getElapsedSec();
                     LOG(Helper::LogLevel::LL_Info,
@@ -626,6 +636,8 @@ namespace SPTAG {
                     while(!p_index->AllFinished())
                     {
                         std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                        waited += 50;
+                        if (waited % 100000 == 0) ShowMemoryStatus(vectorSet);
                     }
                     double syncingCost = sw.getElapsedSec();
                     LOG(Helper::LogLevel::LL_Info,
@@ -664,9 +676,6 @@ namespace SPTAG {
                     ShowMemoryStatus(vectorSet);
 
                     p_index->printSplitStatus();
-                    // p_index->printSplitTheSameHeadStatus();
-                    // p_index->QuantifyAssumptionBrokenTotally();
-                    // exit(0);
                 }
             }
 

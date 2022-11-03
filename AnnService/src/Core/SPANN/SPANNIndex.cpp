@@ -852,18 +852,19 @@ namespace SPTAG
                 uint8_t version = 0;
                 m_versionMap.UpdateVersion(VID, version);
 
+                std::string assignment;
+                assignment += Helper::Convert::Serialize<char>(&insertCode, 1);
+                assignment += Helper::Convert::Serialize<char>(&replicaCount, 1);
                 for (int i = 0; i < replicaCount; i++)
                 {
-                    std::string assignment;
-                    assignment += Helper::Convert::Serialize<char>(&insertCode, 1);
                     // LOG(Helper::LogLevel::LL_Info, "VID: %d, HeadID: %d, Write To PersistentBuffer\n", VID, selections[i].headID);
                     assignment += Helper::Convert::Serialize<int>(&selections[i].headID, 1);
                     assignment += Helper::Convert::Serialize<int>(&VID, 1);
                     assignment += Helper::Convert::Serialize<uint8_t>(&version, 1);
                     // assignment += Helper::Convert::Serialize<float>(&selections[i].distance, 1);
                     assignment += Helper::Convert::Serialize<T>(p_queryResults[k].GetTarget(), m_options.m_dim);
-                    m_persistentBuffer->PutAssignment(assignment);
                 }
+                m_assignmentQueue.push(m_persistentBuffer->PutAssignment(assignment));
             }
             return ErrorCode::Success;
         }
@@ -890,50 +891,46 @@ namespace SPTAG
             // int32_t vectorInfoSize = m_index->GetValueSize() + sizeof(int) + sizeof(uint8_t) + sizeof(float);
             int32_t vectorInfoSize = m_index->GetValueSize() + sizeof(int) + sizeof(uint8_t);
             while (running) {
-                bool noAssignment = true;
-                int currentAssignmentID = m_persistentBuffer->GetCurrentAssignmentID();
-                int scanNum = std::min<int>(sentAssignment + batch, currentAssignmentID);
-                if (scanNum != sentAssignment) {
-                    noAssignment = false;
-                }
 
                 std::map<SizeType, std::shared_ptr<std::string>> newPart;
                 newPart.clear();
                 int i;
-                for (i = sentAssignment; i < scanNum; i++) {
+                for (i = 0; i < batch; i++) {
                     std::string assignment;
-                    m_persistentBuffer->GetAssignment(i, &assignment);
-                    if(assignment.empty())
-                        break;
-                    //uint8_t* postingP = reinterpret_cast<uint8_t*>(&assignment.front());
-                    char code = *(reinterpret_cast<char*>(assignment.data()));
-                    if (assignment.empty())
-                    {
-                        LOG(Helper::LogLevel::LL_Info, "Error\n");
-                        LOG(Helper::LogLevel::LL_Info, "ScanNum: %d, SentNum: %d, CurrentAssignNum: %d, ProcessingAssignment: %d\n", scanNum, sentAssignment.load(), currentAssignmentID, i);
-                        exit(1);
+                    int assignId = m_index->GetNextAssignment();
+
+                    if (assignId == -1) break;
+
+                    m_persistentBuffer->GetAssignment(assignId, &assignment);
+                    if(assignment.empty()) {
+                        LOG(Helper::LogLevel::LL_Info, "Error: Get Assignment\n");
+                        exit(0);
                     }
+                    char code = *(reinterpret_cast<char*>(assignment.data()));
                     if (code == 0) {
                         // insert
-                        char* headPointer = assignment.data() + sizeof(char);
-                        int32_t headID = *(reinterpret_cast<int*>(headPointer));
-                        int32_t vid = *(reinterpret_cast<int*>(headPointer + sizeof(int)));
-                        uint8_t version = *(reinterpret_cast<uint8_t*>(headPointer + sizeof(int) + sizeof(int)));
+                        char* replicaCount = assignment.data() + sizeof(char);
+                        // LOG(Helper::LogLevel::LL_Info, "dispatch: replica count: %d\n", *replicaCount);
 
-                        //debug code
+                        for (char index = 0; index < *replicaCount; index++) {
+                            char* headPointer = assignment.data() + sizeof(char) + sizeof(char) + index * (vectorInfoSize + sizeof(int));
+                            int32_t headID = *(reinterpret_cast<int*>(headPointer));
+                            // LOG(Helper::LogLevel::LL_Info, "dispatch: headID: %d\n", headID);
+                            int32_t vid = *(reinterpret_cast<int*>(headPointer + sizeof(int)));
+                            // LOG(Helper::LogLevel::LL_Info, "dispatch: vid: %d\n", vid);
+                            uint8_t version = *(reinterpret_cast<uint8_t*>(headPointer + sizeof(int) + sizeof(int)));
+                            // LOG(Helper::LogLevel::LL_Info, "dispatch: version: %d\n", version);
 
-                        //LOG(Helper::LogLevel::LL_Info, "Dispatcher: code: %d, headID: %d, assignment size: %d, vid: %d\n", code, *(reinterpret_cast<int*>(headPointer)), assignment.size(), vid);
-                        //LOG(Helper::LogLevel::LL_Info, "Dispatcher: ScanNum: %d, SentNum: %d, CurrentAssignNum: %d, ProcessingAssignment: %d\n", scanNum, sentAssignment.load(), currentAssignmentID, i);
-
-                        if (m_index->CheckIdDeleted(vid) || !m_index->CheckVersionValid(vid, version)) {
-                            // LOG(Helper::LogLevel::LL_Info, "Unvalid Vector: %d, version: %d, current version: %d\n", vid, version);
-                            continue;
-                        }
-                        // LOG(Helper::LogLevel::LL_Info, "Vector: %d, Plan to append to: %d\n", vid, headID);
-                        if (newPart.find(headID) == newPart.end()) {
-                            newPart[headID] = std::make_shared<std::string>(assignment.substr(sizeof(char)+ sizeof(int), vectorInfoSize));
-                        } else {
-                            newPart[headID]->append(assignment.substr(sizeof(char)+ sizeof(int), vectorInfoSize));
+                            if (m_index->CheckIdDeleted(vid) || !m_index->CheckVersionValid(vid, version)) {
+                                // LOG(Helper::LogLevel::LL_Info, "Unvalid Vector: %d, version: %d, current version: %d\n", vid, version);
+                                continue;
+                            }
+                            // LOG(Helper::LogLevel::LL_Info, "Vector: %d, Plan to append to: %d\n", vid, headID);
+                            if (newPart.find(headID) == newPart.end()) {
+                                newPart[headID] = std::make_shared<std::string>(assignment.substr(sizeof(char) + sizeof(char) + index * (vectorInfoSize + sizeof(int)) + sizeof(int), vectorInfoSize));
+                            } else {
+                                newPart[headID]->append(assignment.substr(sizeof(char) + sizeof(char) + index * (vectorInfoSize + sizeof(int)) + sizeof(int), vectorInfoSize));
+                            }
                         }
                     } else {
                         // delete
@@ -950,8 +947,7 @@ namespace SPTAG
                     m_index->AppendAsync(iter.first, appendNum, iter.second);
                 }
 
-                sentAssignment = i;
-                if (noAssignment) {
+                if (i == 0) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 } else {
                     //LOG(Helper::LogLevel::LL_Info, "Process Append Assignments: %d, Delete Assignments: %d\n", newPart.size(), deletedVector.size());
@@ -984,12 +980,12 @@ namespace SPTAG
             auto vectorBuf = vectorBuffer.get();
             size_t realVectorNum = postVectorNum;
             int index = 0;
-            //LOG(Helper::LogLevel::LL_Info, "Scanning\n");
+            // LOG(Helper::LogLevel::LL_Info, "Scanning\n");
             // for (int i = 0; i < appendNum; i++)
             // {
             //     uint32_t idx = i * vectorInfoSize;
-            //     m_totalReplicaCount[*(int*)(&appendPosting[idx])]++;
-            //     // LOG(Helper::LogLevel::LL_Info, "VID: %d, append to %d, version: %d\n", *(int*)(&appendPosting[idx]), headID, *(uint8_t*)(&appendPosting[idx + sizeof(int)]));
+            //     // m_totalReplicaCount[*(int*)(&appendPosting[idx])]++;
+            //     LOG(Helper::LogLevel::LL_Info, "VID: %d, append to %d, version: %d\n", *(int*)(&appendPosting[idx]), headID, *(uint8_t*)(&appendPosting[idx + sizeof(int)]));
             // }
             for (int j = 0; j < postVectorNum; j++)
             {
@@ -1372,7 +1368,7 @@ namespace SPTAG
                     if (!m_index->ContainSample(headID)) {
                         goto checkDeleted;
                     }
-                    //LOG(Helper::LogLevel::LL_Info, "Merge: headID: %d, appendNum:%d\n", headID, appendNum);
+                    // LOG(Helper::LogLevel::LL_Info, "Merge: headID: %d, appendNum:%d\n", headID, appendNum);
                     if (m_extraSearcher->AppendPosting(headID, appendPosting) != ErrorCode::Success) {
                         LOG(Helper::LogLevel::LL_Error, "Merge failed!\n");
                     }

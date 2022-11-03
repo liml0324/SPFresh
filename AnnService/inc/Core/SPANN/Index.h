@@ -30,6 +30,7 @@
 #include <utility>
 #include <random>
 #include <tbb/concurrent_hash_map.h>
+#include <tbb/concurrent_queue.h>
 
 namespace SPTAG
 {
@@ -155,15 +156,13 @@ namespace SPTAG
 
                 inline bool allFinished()
                 {
-                    return sentAssignment == m_persistentBuffer->GetCurrentAssignmentID()
-                           && appendThreadPool->allClear()
+                    return appendThreadPool->allClear()
                            && reassignThreadPool->allClear();
                 }
 
                 inline bool allFinishedExceptReassign()
                 {
-                    return sentAssignment == m_persistentBuffer->GetCurrentAssignmentID()
-                           && appendThreadPool->allClear();
+                    return appendThreadPool->allClear();
                 }
 
                 inline bool reassignFinished()
@@ -239,6 +238,7 @@ namespace SPTAG
             //COMMON::Labelset m_reassignedID;
 
             tbb::concurrent_hash_map<SizeType, SizeType> m_reassignMap;
+            tbb::concurrent_queue<int> m_assignmentQueue;
 
             std::atomic_uint32_t m_headMiss{0};
             uint32_t m_appendTaskNum{0};
@@ -371,9 +371,9 @@ namespace SPTAG
 
             void ProcessAsyncReassign(std::shared_ptr<std::string> vectorContain, SizeType VID, SizeType HeadPrev, uint8_t version, std::function<void()> p_callback);
 
-            bool AllFinished() {return m_dispatcher->allFinished();}
+            bool AllFinished() {return m_dispatcher->allFinished() && m_assignmentQueue.empty();}
 
-            bool AllFinishedExceptReassign() {return m_dispatcher->allFinishedExceptReassign();}
+            bool AllFinishedExceptReassign() {return m_dispatcher->allFinishedExceptReassign() && m_assignmentQueue.empty();}
 
             bool ReassignFinished() {return m_dispatcher->reassignFinished();}
 
@@ -798,6 +798,15 @@ namespace SPTAG
                 
 
                 return true;
+            }
+
+            int GetNextAssignment()
+            {
+                int assignId;
+                if (m_assignmentQueue.try_pop(assignId)) {
+                    return assignId;
+                }
+                return -1;
             }
         };
     } // namespace SPANN
