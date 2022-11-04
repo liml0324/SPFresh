@@ -22,6 +22,9 @@
 #include <climits>
 #include <future>
 
+// enable rocksdb io_uring
+extern "C" bool RocksDbIOUringEnable() { return true; }
+
 namespace SPTAG::SPANN
 {
     class RocksDBIO : public Helper::KeyValueIO
