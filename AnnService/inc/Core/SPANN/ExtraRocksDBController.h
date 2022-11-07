@@ -23,7 +23,7 @@
 #include <future>
 
 // enable rocksdb io_uring
-extern "C" bool RocksDbIOUringEnable() { return true; }
+// extern "C" bool RocksDbIOUringEnable() { return true; }
 
 namespace SPTAG::SPANN
 {
@@ -261,7 +261,7 @@ namespace SPTAG::SPANN
             db.MultiGet(p_exWorkSpace->m_postingIDs, &postingLists);
             auto readEnd = std::chrono::high_resolution_clock::now();
 
-            diskIO++;
+            diskIO+=postingListCount;
 
             readLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(readEnd - readStart).count());
 
@@ -388,12 +388,13 @@ namespace SPTAG::SPANN
                     }
 
                     float acc = 0;
-#pragma omp parallel for schedule(dynamic)
-                    for (int j = 0; j < sampleNum; j++)
-                    {
-                        COMMON::Utils::atomic_float_add(&acc, COMMON::TruthSet::CalculateRecall(p_headIndex.get(), fullVectors->GetVector(samples[j]), candidateNum));
-                    }
-                    acc = acc / sampleNum;
+// #pragma omp parallel for schedule(dynamic)
+//                     for (int j = 0; j < sampleNum; j++)
+//                     {
+//                         COMMON::Utils::atomic_float_add(&acc, COMMON::TruthSet::CalculateRecall(p_headIndex.get(), fullVectors->GetVector(samples[j]), candidateNum));
+
+//                     }
+//                     acc = acc / sampleNum;
                     LOG(Helper::LogLevel::LL_Info, "Batch %d vector(%d,%d) loaded with %d vectors (%zu) HeadIndex acc @%d:%f.\n", i, start, end, fullVectors->Count(), selections.m_selections.size(), candidateNum, acc);
 
                     p_headIndex->ApproximateRNG(fullVectors, emptySet, candidateNum, selections.m_selections.data(), p_opt.m_replicaCount, numThreads, p_opt.m_gpuSSDNumTrees, p_opt.m_gpuSSDLeafSize, p_opt.m_rngFactor, p_opt.m_numGPUs);
@@ -595,6 +596,7 @@ namespace SPTAG::SPANN
         inline SizeType  GetIndexSize() override { return m_postingNum; }
         inline SizeType  GetPostingSizeLimit() override { return m_postingSizeLimit;}
         inline SizeType  GetMetaDataSize() override { return m_metaDataSize;}
+        inline ErrorCode SearchIndexMulti(const std::vector<SizeType>& keys, std::vector<std::string>* values) override {return db.MultiGet(keys, values);}
     private:
         struct ListInfo
         {

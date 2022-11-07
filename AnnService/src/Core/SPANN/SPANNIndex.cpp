@@ -1037,7 +1037,7 @@ namespace SPTAG
             // k = 2, maybe we can change the split number, now it is fixed
             SPTAG::COMMON::KmeansArgs<ValueType> args(2, smallSample.C(), (SizeType)localIndicesInsert.size(), 1, m_index->GetDistCalcMethod());
             std::shuffle(localIndices.begin(), localIndices.end(), std::mt19937(std::random_device()()));
-            int numClusters = SPTAG::COMMON::KmeansClustering(smallSample, localIndices, 0, (SizeType)localIndices.size(), args, 1000, 100.0F, false, nullptr, true);
+            int numClusters = SPTAG::COMMON::KmeansClustering(smallSample, localIndices, 0, (SizeType)localIndices.size(), args, 1000, 100.0F, false, nullptr, false);
             if (numClusters <= 1)
             {
                 LOG(Helper::LogLevel::LL_Info, "Cluserting Failed\n");
@@ -1102,7 +1102,7 @@ namespace SPTAG
             }
             if (!theSameHead) {
                 m_index->DeleteIndex(headID);
-                m_extraSearcher->DeleteIndex(headID);
+                // m_extraSearcher->DeleteIndex(headID);
                 m_postingSizes[headID] = 0;
             }
             lock.unlock();
@@ -1147,11 +1147,16 @@ namespace SPTAG
                         break;
                     }
                     if (find(newHeadsID.begin(), newHeadsID.end(), vid) == newHeadsID.end()) {
-                        m_extraSearcher->SearchIndex(vid, tempPostingList);
-                        postingLists.push_back(tempPostingList);
+                        // m_extraSearcher->SearchIndex(vid, tempPostingList);
+                        // postingLists.push_back(tempPostingList);
                         HeadPrevTopK.push_back(vid);
                         HeadPrevToSplitHeadDist.push_back(queryResults[i].Dist);
                     }
+                }
+                std::vector<std::string> tempPostingLists;
+                m_extraSearcher->SearchIndexMulti(HeadPrevTopK, &tempPostingLists);
+                for (int i = 0; i < HeadPrevTopK.size(); i++) {
+                    postingLists.push_back(tempPostingLists[i]);
                 }
             }
 

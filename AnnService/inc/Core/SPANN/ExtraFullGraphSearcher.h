@@ -499,6 +499,7 @@ namespace SPTAG
             virtual SizeType  GetIndexSize() { return -1; }
             virtual SizeType  GetPostingSizeLimit() { return -1; }
             virtual SizeType  GetMetaDataSize() { return -1;}
+            inline ErrorCode SearchIndexMulti(const std::vector<SizeType>& keys, std::vector<std::string>* values) { return ErrorCode::Undefined;}
         private:
             struct ListInfo
             {
