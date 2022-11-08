@@ -23,7 +23,7 @@
 #include <future>
 
 // enable rocksdb io_uring
-// extern "C" bool RocksDbIOUringEnable() { return true; }
+extern "C" bool RocksDbIOUringEnable() { return true; }
 
 namespace SPTAG::SPANN
 {
@@ -39,7 +39,7 @@ namespace SPTAG::SPANN
             LOG(Helper::LogLevel::LL_Info, "RocksDB Status: %s\n%s", dbPath.c_str(),stats.c_str());
             */
             db->Close();
-            DestroyDB(dbPath, dbOptions);
+            // DestroyDB(dbPath, dbOptions);
             delete db;
         }
 
@@ -447,63 +447,63 @@ namespace SPTAG::SPANN
                 }
             }
 
-// #pragma omp parallel for schedule(dynamic)
-//             for (int i = 0; i < postingListSize.size(); ++i)
-//             {
-//                 if (postingListSize[i] <= postingSizeLimit) continue;
+#pragma omp parallel for schedule(dynamic)
+            for (int i = 0; i < postingListSize.size(); ++i)
+            {
+                if (postingListSize[i] <= postingSizeLimit) continue;
 
-//                 std::size_t selectIdx = std::lower_bound(selections.m_selections.begin(), selections.m_selections.end(), i, Selection::g_edgeComparer) - selections.m_selections.begin();
+                std::size_t selectIdx = std::lower_bound(selections.m_selections.begin(), selections.m_selections.end(), i, Selection::g_edgeComparer) - selections.m_selections.begin();
 
-//                 for (size_t dropID = postingSizeLimit; dropID < postingListSize[i]; ++dropID)
-//                 {
-//                     int tonode = selections.m_selections[selectIdx + dropID].tonode;
-//                     --replicaCount[tonode];
-//                 }
-//                 postingListSize[i] = postingSizeLimit;
-//             }
+                for (size_t dropID = postingSizeLimit; dropID < postingListSize[i]; ++dropID)
+                {
+                    int tonode = selections.m_selections[selectIdx + dropID].tonode;
+                    --replicaCount[tonode];
+                }
+                postingListSize[i] = postingSizeLimit;
+            }
 
-//             {
-//                 std::vector<int> replicaCountDist(p_opt.m_replicaCount + 1, 0);
-//                 for (int i = 0; i < replicaCount.size(); ++i)
-//                 {
-//                     ++replicaCountDist[replicaCount[i]];
-//                 }
+            {
+                std::vector<int> replicaCountDist(p_opt.m_replicaCount + 1, 0);
+                for (int i = 0; i < replicaCount.size(); ++i)
+                {
+                    ++replicaCountDist[replicaCount[i]];
+                }
 
-//                 LOG(Helper::LogLevel::LL_Info, "After Posting Cut:\n");
-//                 for (int i = 0; i < replicaCountDist.size(); ++i)
-//                 {
-//                     LOG(Helper::LogLevel::LL_Info, "Replica Count Dist: %d, %d\n", i, replicaCountDist[i]);
-//                 }
-//             }
+                LOG(Helper::LogLevel::LL_Info, "After Posting Cut:\n");
+                for (int i = 0; i < replicaCountDist.size(); ++i)
+                {
+                    LOG(Helper::LogLevel::LL_Info, "Replica Count Dist: %d, %d\n", i, replicaCountDist[i]);
+                }
+            }
 
-//             if (p_opt.m_outputEmptyReplicaID)
-//             {
-//                 std::vector<int> replicaCountDist(p_opt.m_replicaCount + 1, 0);
-//                 auto ptr = SPTAG::f_createIO();
-//                 if (ptr == nullptr || !ptr->Initialize("EmptyReplicaID.bin", std::ios::binary | std::ios::out)) {
-//                     LOG(Helper::LogLevel::LL_Error, "Fail to create EmptyReplicaID.bin!\n");
-//                     return false;
-//                 }
-//                 for (int i = 0; i < replicaCount.size(); ++i)
-//                 {
+            if (p_opt.m_outputEmptyReplicaID)
+            {
+                std::vector<int> replicaCountDist(p_opt.m_replicaCount + 1, 0);
+                auto ptr = SPTAG::f_createIO();
+                if (ptr == nullptr || !ptr->Initialize("EmptyReplicaID.bin", std::ios::binary | std::ios::out)) {
+                    LOG(Helper::LogLevel::LL_Error, "Fail to create EmptyReplicaID.bin!\n");
+                    return false;
+                }
+                for (int i = 0; i < replicaCount.size(); ++i)
+                {
 
-//                     ++replicaCountDist[replicaCount[i]];
+                    ++replicaCountDist[replicaCount[i]];
 
-//                     if (replicaCount[i] < 2)
-//                     {
-//                         long long vid = i;
-//                         if (ptr->WriteBinary(sizeof(vid), reinterpret_cast<char*>(&vid)) != sizeof(vid)) {
-//                             LOG(Helper::LogLevel::LL_Error, "Failt to write EmptyReplicaID.bin!");
-//                             return false;
-//                         }
-//                     }
-//                 }
-//                 LOG(Helper::LogLevel::LL_Info, "After Posting Cut:\n");
-//                 for (int i = 0; i < replicaCountDist.size(); ++i)
-//                 {
-//                     LOG(Helper::LogLevel::LL_Info, "Replica Count Dist: %d, %d\n", i, replicaCountDist[i]);
-//                 }
-//             }
+                    if (replicaCount[i] < 2)
+                    {
+                        long long vid = i;
+                        if (ptr->WriteBinary(sizeof(vid), reinterpret_cast<char*>(&vid)) != sizeof(vid)) {
+                            LOG(Helper::LogLevel::LL_Error, "Failt to write EmptyReplicaID.bin!");
+                            return false;
+                        }
+                    }
+                }
+                LOG(Helper::LogLevel::LL_Info, "After Posting Cut:\n");
+                for (int i = 0; i < replicaCountDist.size(); ++i)
+                {
+                    LOG(Helper::LogLevel::LL_Info, "Replica Count Dist: %d, %d\n", i, replicaCountDist[i]);
+                }
+            }
 
 
             auto t4 = std::chrono::high_resolution_clock::now();

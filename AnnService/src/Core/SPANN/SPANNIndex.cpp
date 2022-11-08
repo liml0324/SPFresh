@@ -629,6 +629,7 @@ namespace SPTAG
                     IOBINARY(ptr, ReadBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), (char*)(m_vectorTranslateMap.get()));
                 } else {
                     //data structrue initialization
+                    LOG(Helper::LogLevel::LL_Info, "DataBlockSize: %d, Capacity: %d\n", m_index->m_iDataBlockSize, m_index->m_iDataCapacity);
                     m_versionMap.Load(m_options.m_fullDeletedIDFile, m_index->m_iDataBlockSize, m_index->m_iDataCapacity);
                     m_postingSizes = std::make_unique<std::atomic_uint32_t[]>(m_options.m_maxHeadNode);
                     std::ifstream input(m_options.m_ssdInfoFile, std::ios::binary);
@@ -682,11 +683,6 @@ namespace SPTAG
 
             m_dispatcher->run();
             LOG(Helper::LogLevel::LL_Info, "SPFresh: finish initialization\n");
-
-            SimplyCountSplit.resize(20);
-            for (int i = 0; i < 20; i++) {
-                SimplyCountSplit[i] = 0;
-            }
             
             auto t4 = std::chrono::high_resolution_clock::now();
             double buildSSDTime = std::chrono::duration_cast<std::chrono::seconds>(t4 - t3).count();
@@ -1062,7 +1058,6 @@ namespace SPTAG
             for (int k = 0; k < 2; k++) {
                 std::string postingList;
                 if (args.counts[k] == 0)	continue;
-                SimplyCountSplit[args.counts[k] / 10]++;
                 if (!theSameHead && m_index->ComputeDistance(args.centers + k * args._D, m_index->GetSample(headID)) < Epsilon) {
                     newHeadsID.push_back(headID);
                     newHeadVID = headID;

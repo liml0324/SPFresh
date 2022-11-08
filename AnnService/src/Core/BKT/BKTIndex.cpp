@@ -49,6 +49,8 @@ namespace SPTAG
             if (p_indexStreams.size() < 4) return ErrorCode::LackOfInputs;
 
             ErrorCode ret = ErrorCode::Success;
+            m_iDataBlockSize = 20000000;
+            LOG(Helper::LogLevel::LL_Info, "DataSize: %d\n", m_iDataBlockSize);
             if (p_indexStreams[0] == nullptr || (ret = m_pSamples.Load(p_indexStreams[0], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
             if (p_indexStreams[1] == nullptr || (ret = m_pTrees.LoadTrees(p_indexStreams[1])) != ErrorCode::Success) return ret;
             if (p_indexStreams[2] == nullptr || (ret = m_pGraph.LoadGraph(p_indexStreams[2], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
@@ -549,6 +551,13 @@ namespace SPTAG
 
                 if (p_dimension != GetFeatureDim()) return ErrorCode::DimensionSizeMismatch;
 
+
+                // m_pSamples.AddBatch((const T*)p_data, p_vectorNum);
+                // LOG(Helper::LogLevel::LL_Info, "Add Samples\n");
+                // m_pGraph.AddBatch(p_vectorNum);
+                // LOG(Helper::LogLevel::LL_Info, "Add Graph\n");
+                // m_deletedID.AddBatch(p_vectorNum);
+                // LOG(Helper::LogLevel::LL_Info, "Add DeleteID\n");
                 if (m_pSamples.AddBatch((const T*)p_data, p_vectorNum) != ErrorCode::Success ||
                     m_pGraph.AddBatch(p_vectorNum) != ErrorCode::Success ||
                     m_deletedID.AddBatch(p_vectorNum) != ErrorCode::Success) {

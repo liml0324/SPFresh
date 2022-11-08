@@ -65,6 +65,48 @@ namespace SPTAG {
                 }
             };
 
+            template <typename ValueType>
+            void OutputResult(const std::string& p_output, std::vector<QueryResult>& p_results, int p_resultNum)
+            {
+                if (!p_output.empty())
+                {
+                    auto ptr = f_createIO();
+                    if (ptr == nullptr || !ptr->Initialize(p_output.c_str(), std::ios::binary | std::ios::out)) {
+                        LOG(Helper::LogLevel::LL_Error, "Failed create file: %s\n", p_output.c_str());
+                        exit(1);
+                    }
+                    int32_t i32Val = static_cast<int32_t>(p_results.size());
+                    if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
+                        LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
+                        exit(1);
+                    }
+                    i32Val = p_resultNum;
+                    if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
+                        LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
+                        exit(1);
+                    }
+
+                    float fVal = 0;
+                    for (size_t i = 0; i < p_results.size(); ++i)
+                    {
+                        for (int j = 0; j < p_resultNum; ++j)
+                        {
+                            i32Val = p_results[i].GetResult(j)->VID;
+                            if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
+                                LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
+                                exit(1);
+                            }
+
+                            fVal = p_results[i].GetResult(j)->Dist;
+                            if (ptr->WriteBinary(sizeof(fVal), reinterpret_cast<char*>(&fVal)) != sizeof(fVal)) {
+                                LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
+                                exit(1);
+                            }
+                        }
+                    }
+                }
+            }
+
             void ShowMemoryStatus(std::shared_ptr<SPTAG::VectorSet> vectorSe, double second)
             {
                 int tSize = 0, resident = 0, share = 0;
@@ -509,9 +551,10 @@ namespace SPTAG {
                 if (p_opts.m_calTruth)
                 {
                     std::vector<std::set<SizeType>> truth;
-                    int truthK = p_opts.m_resultNum;
-                    LoadTruth(p_opts, truth, numQueries, GetTruthFileName(p_opts.m_truthFilePrefix, curCount), truthK);
-                    CalculateRecallSPFresh<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, p_opts.m_resultNum, truthK, querySet, vectorSet, numQueries);
+                    // int truthK = p_opts.m_resultNum;
+                    // LoadTruth(p_opts, truth, numQueries, GetTruthFileName(p_opts.m_truthFilePrefix, curCount), truthK);
+                    // CalculateRecallSPFresh<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, p_opts.m_resultNum, truthK, querySet, vectorSet, numQueries);
+                    OutputResult<ValueType>(GetTruthFileName(p_opts.m_searchResult, curCount), results, p_opts.m_resultNum);
                 }
             }
 

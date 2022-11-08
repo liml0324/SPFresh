@@ -391,21 +391,6 @@ namespace SPTAG
 
             unsigned long getReAssignScanNum() {return m_reAssignScanNum.load();}
 
-            void printSplitStatus() 
-            {
-                for (int i = 0; i < 13; i++)
-                {
-                    LOG(Helper::LogLevel::LL_Info, "%d ~ %d\t", i*10, (i+1)*10-1);
-                }
-                LOG(Helper::LogLevel::LL_Info, "\n");
-                for (int i = 0; i < 13; i++)
-                {
-                    LOG(Helper::LogLevel::LL_Info, "%6d\t", SimplyCountSplit[i]);
-                }
-                LOG(Helper::LogLevel::LL_Info, "\n");
-                return;
-            }
-
             void UpdateStop()
             {
                 m_persistentBuffer->StopPB();
