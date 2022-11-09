@@ -104,6 +104,8 @@ namespace SPTAG::SPANN
                     delete [] slice_keys;
                     delete [] slice_values;
                     delete [] statuses;
+                    auto key = Helper::Convert::Unserialize<SizeType>(keys[i]);
+                    LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in MultiGet\e[0m: %s, key: %d\n", statuses[i].ToString().c_str(), *(key.get()));
                     return ErrorCode::Fail;
                 }
                 values->push_back(slice_values[i].ToString());
