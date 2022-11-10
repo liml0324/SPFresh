@@ -114,10 +114,11 @@ namespace SPTAG {
                 buffer >> tSize >> resident >> share;
                 buffer.close();
                 long page_size_kb = sysconf(_SC_PAGE_SIZE) / 1024; // in case x86-64 is configured to use 2MB pages
-                double rss = resident * page_size_kb;
-                double vector_size = vectorSet->PerVectorDataSize() * vectorSet->Count() / 1024;
+                long rss = resident * page_size_kb;
+                long vector_size = vectorSet->PerVectorDataSize() * (vectorSet->Count() / 1024);
+                long vector_size_mb = vector_size / 1024;
 
-                LOG(Helper::LogLevel::LL_Info,"Current time: %.0lf. RSS : %.6lf KB, Vector Set Size : %.6lf KB\n", second, rss, vector_size);
+                LOG(Helper::LogLevel::LL_Info,"Current time: %.0lf. RSS : %ld MB, Vector Set Size : %ld MB, True Size: %ld MB\n", second, rss / 1024, vector_size_mb, rss / 1024 - vector_size_mb);
             }
 
             template<typename T, typename V>
@@ -654,7 +655,7 @@ namespace SPTAG {
                     insertCount = p_opts.m_endVectorNum - curCount;
                 }
 
-                p_index->ForceCompaction();
+                // p_index->ForceCompaction();
 
                 if (p_opts.m_maxInternalResultNum != -1) 
                 {
