@@ -63,6 +63,9 @@ namespace SPTAG::SPANN
 
             auto s = rocksdb::DB::Open(dbOptions, dbPath, &db);
             LOG(Helper::LogLevel::LL_Info, "SPFresh: New Rocksdb: %s\n", filePath);
+            if (s != rocksdb::Status::OK()) {
+                LOG(Helper::LogLevel::LL_Error, "\e[0;31mRocksdb Open Error\e[0m: %s\n", s.getState());
+            }
             return s == rocksdb::Status::OK();
         }
 
@@ -105,7 +108,7 @@ namespace SPTAG::SPANN
                     delete [] slice_values;
                     delete [] statuses;
                     auto key = Helper::Convert::Unserialize<SizeType>(keys[i]);
-                    LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in MultiGet\e[0m: %s, key: %d\n", statuses[i].ToString().c_str(), *(key.get()));
+                    LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in MultiGet\e[0m: %s, key: %d\n", statuses[i].getState(), *(key.get()));
                     return ErrorCode::Fail;
                 }
                 values->push_back(slice_values[i].ToString());
@@ -197,8 +200,12 @@ namespace SPTAG::SPANN
             LOG(Helper::LogLevel::LL_Info, "RocksDB Status:\n%s", stats.c_str());
             */
             LOG(Helper::LogLevel::LL_Info, "Start Compaction\n");
-            db->CompactRange(rocksdb::CompactRangeOptions(), nullptr, nullptr);
+            auto s = db->CompactRange(rocksdb::CompactRangeOptions(), nullptr, nullptr);
             LOG(Helper::LogLevel::LL_Info, "Finish Compaction\n");
+
+            if (s != rocksdb::Status::OK()) {
+                LOG(Helper::LogLevel::LL_Error, "\e[0;31mRocksdb Compact Error\e[0m: %s\n", s.getState());
+            }
             /*
             db->GetProperty("rocksdb.stats", &stats);
             LOG(Helper::LogLevel::LL_Info, "RocksDB Status:\n%s", stats.c_str());
