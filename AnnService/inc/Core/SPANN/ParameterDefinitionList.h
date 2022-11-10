@@ -158,15 +158,11 @@ DefineSSDParameter(m_batch, int, 1000, "Batch")
 // Total Vector Path
 DefineSSDParameter(m_fullVectorPath, std::string, std::string(""), "FullVectorPath")
 
-//Stability
-DefineSSDParameter(m_stability, bool, false, "Stability")
-DefineSSDParameter(m_indexSize, float, 0.05, "IndexSize")
-DefineSSDParameter(m_indexBatch, int, 50, "IndexBatch")
-
 // SPANN
 DefineSSDParameter(m_postingVectorLimit, int, 1000, "PostingSearchVectorLimit")
 DefineSSDParameter(m_disableReassign, bool, false, "DisableReassign")
-DefineSSDParameter(m_addDeleteTaskToPM, bool, false, "AddDeleteTaskToLog")
+DefineSSDParameter(m_searchDuringUpdate, bool, false, "SearchDuringUpdate")
 DefineSSDParameter(m_reassignK, int, 0, "ReassignK")
 DefineSSDParameter(m_maxHeadNode, int, 200000000, "MaxHeadNode")
+DefineSSDParameter(m_virtualHead, bool, false, "VirtualHead")
 #endif

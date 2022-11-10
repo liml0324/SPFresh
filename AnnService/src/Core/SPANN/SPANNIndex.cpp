@@ -643,11 +643,6 @@ namespace SPTAG
                     input.read(reinterpret_cast<char*>(&vectorNum), sizeof(vectorNum));
 					m_vectorNum.store(vectorNum);
 
-                    m_totalReplicaCount.resize(vectorNum);
-                    for (int i = 0; i < vectorNum; i++) {
-                        m_totalReplicaCount[i] = 0;
-                    }
-
 					LOG(Helper::LogLevel::LL_Info, "Current vector num: %d.\n", m_vectorNum.load());
 
 					uint32_t postingNum;
@@ -811,7 +806,6 @@ namespace SPTAG
                     }
                     //m_reassignedID.AddBatch(1);
                 }
-                m_totalReplicaCount.push_back(0);
 
                 m_index->SearchIndex(p_queryResults[k]);
 
@@ -868,16 +862,14 @@ namespace SPTAG
         template <typename T>
         ErrorCode Index<T>::DeleteIndex(const SizeType &p_id)
         {
-            if (m_options.m_addDeleteTaskToPM) {
-                char deleteCode = 1;
-                int VID = p_id;
-                std::string assignment;
-                assignment += Helper::Convert::Serialize<char>(&deleteCode, 1);
-                assignment += Helper::Convert::Serialize<int>(&VID, 1);
-                m_persistentBuffer->PutAssignment(assignment);
-            } else {
-                m_versionMap.Delete(p_id);
-            }
+            LOG(Helper::LogLevel::LL_Info, "Delete not support\n");
+            exit(0);
+            char deleteCode = 1;
+            int VID = p_id;
+            std::string assignment;
+            assignment += Helper::Convert::Serialize<char>(&deleteCode, 1);
+            assignment += Helper::Convert::Serialize<int>(&VID, 1);
+            m_assignmentQueue.push(m_persistentBuffer->PutAssignment(assignment));
             return ErrorCode::Success;
         }
 
@@ -976,26 +968,12 @@ namespace SPTAG
             auto vectorBuf = vectorBuffer.get();
             size_t realVectorNum = postVectorNum;
             int index = 0;
-            // LOG(Helper::LogLevel::LL_Info, "Scanning\n");
-            // for (int i = 0; i < appendNum; i++)
-            // {
-            //     uint32_t idx = i * vectorInfoSize;
-            //     // m_totalReplicaCount[*(int*)(&appendPosting[idx])]++;
-            //     LOG(Helper::LogLevel::LL_Info, "VID: %d, append to %d, version: %d\n", *(int*)(&appendPosting[idx]), headID, *(uint8_t*)(&appendPosting[idx + sizeof(int)]));
-            // }
             for (int j = 0; j < postVectorNum; j++)
             {
                 uint8_t* vectorId = postingP + j * vectorInfoSize;
                 //LOG(Helper::LogLevel::LL_Info, "vector index/total:id: %d/%d:%d\n", j, m_postingSizes[headID].load(), *(reinterpret_cast<int*>(vectorId)));
                 uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(int)));
                 if (CheckIdDeleted(*(reinterpret_cast<int*>(vectorId))) || !CheckVersionValid(*(reinterpret_cast<int*>(vectorId)), version)) {
-                    // m_totalReplicaCount[*(reinterpret_cast<int*>(vectorId))]--;
-                    // tbb::concurrent_hash_map<SizeType, SizeType>::const_accessor VIDAccessor;
-                    // if (m_totalReplicaCount[*(reinterpret_cast<int*>(vectorId))] == 0 && !m_reassignMap.find(VIDAccessor, *(reinterpret_cast<int*>(vectorId)))) {
-                    //     LOG(Helper::LogLevel::LL_Info, "Vector Error: %d, current version: %d, real version: %d\n", *(reinterpret_cast<int*>(vectorId)), version, m_versionMap.GetVersion(*(reinterpret_cast<int*>(vectorId))));
-                    //     exit(0);
-                    // }
-                    // if (m_reassignMap.find(VIDAccessor, *(reinterpret_cast<int*>(vectorId)))) LOG(Helper::LogLevel::LL_Info, "VID: %d is still re-assigning\n", *(reinterpret_cast<int*>(vectorId)));
                     realVectorNum--;
                 } else {
                     localIndicesInsert[index] = *(reinterpret_cast<int*>(vectorId));
@@ -1033,7 +1011,7 @@ namespace SPTAG
             // k = 2, maybe we can change the split number, now it is fixed
             SPTAG::COMMON::KmeansArgs<ValueType> args(2, smallSample.C(), (SizeType)localIndicesInsert.size(), 1, m_index->GetDistCalcMethod());
             std::shuffle(localIndices.begin(), localIndices.end(), std::mt19937(std::random_device()()));
-            int numClusters = SPTAG::COMMON::KmeansClustering(smallSample, localIndices, 0, (SizeType)localIndices.size(), args, 1000, 100.0F, false, nullptr, false);
+            int numClusters = SPTAG::COMMON::KmeansClustering(smallSample, localIndices, 0, (SizeType)localIndices.size(), args, 1000, 100.0F, false, nullptr, m_options.m_virtualHead);
             if (numClusters <= 1)
             {
                 LOG(Helper::LogLevel::LL_Info, "Cluserting Failed\n");
@@ -1373,12 +1351,6 @@ namespace SPTAG
                         LOG(Helper::LogLevel::LL_Error, "Merge failed!\n");
                     }
                     m_postingSizes[headID].fetch_add(appendNum, std::memory_order_relaxed);
-                    // for (int i = 0; i < appendNum; i++)
-                    // {
-                    //     uint32_t idx = i * vectorInfoSize;
-                    //     m_totalReplicaCount[*(int*)(&appendPosting[idx])]++;
-                    //     // LOG(Helper::LogLevel::LL_Info, "VID: %d, append to %d, version: %d\n", *(int*)(&appendPosting[idx]), headID, *(uint8_t*)(&appendPosting[idx + sizeof(int)]));
-                    // }
                 }
                 // m_appendSsdCost += sw.getElapsedMs() - appendSsdStartTime;
             }

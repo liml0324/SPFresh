@@ -107,7 +107,7 @@ namespace SPTAG {
                 }
             }
 
-            void ShowMemoryStatus(std::shared_ptr<SPTAG::VectorSet> vectorSe, double second)
+            void ShowMemoryStatus(std::shared_ptr<SPTAG::VectorSet> vectorSet, double second)
             {
                 int tSize = 0, resident = 0, share = 0;
                 std::ifstream buffer("/proc/self/statm");
@@ -115,8 +115,9 @@ namespace SPTAG {
                 buffer.close();
                 long page_size_kb = sysconf(_SC_PAGE_SIZE) / 1024; // in case x86-64 is configured to use 2MB pages
                 double rss = resident * page_size_kb;
+                double vector_size = vectorSet->PerVectorDataSize() * vectorSet->Count() / 1024;
 
-                LOG(Helper::LogLevel::LL_Info,"Current time: %.0lf. RSS : %.6lf KB\n", second, rss);
+                LOG(Helper::LogLevel::LL_Info,"Current time: %.0lf. RSS : %.6lf KB, Vector Set Size : %.6lf KB\n", second, rss, vector_size);
             }
 
             template<typename T, typename V>
@@ -668,6 +669,7 @@ namespace SPTAG {
                 }
 
                 ShowMemoryStatus(vectorSet, sw.getElapsedSec());
+                p_index->GetSomeMemorySize();
 
                 int batch;
                 if (step == 0) {
@@ -698,7 +700,7 @@ namespace SPTAG {
                         insert_status = insert_future.wait_for(std::chrono::milliseconds(1000));
                         if (insert_status == std::future_status::timeout) {
                             ShowMemoryStatus(vectorSet, sw.getElapsedSec());
-                            StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, curCount, p_opts, sw.getElapsedSec());
+                            if(p_opts.m_searchDuringUpdate) StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, curCount, p_opts, sw.getElapsedSec());
                         }
                     }while (insert_status != std::future_status::ready);
 

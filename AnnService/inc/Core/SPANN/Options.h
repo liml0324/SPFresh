@@ -133,9 +133,10 @@ namespace SPTAG {
             // Updating
             int m_postingVectorLimit;
             bool m_disableReassign;
-            bool m_addDeleteTaskToPM;
+            bool m_searchDuringUpdate;
             int m_reassignK;
             int m_maxHeadNode;
+            bool m_virtualHead;
 
             // Updating(SPFresh Update Test)
             bool m_update;
@@ -150,11 +151,6 @@ namespace SPTAG {
             int m_reassignThreadNum;
             int m_batch;
             std::string m_fullVectorPath;
-
-            // Stability
-            bool m_stability;
-            float m_indexSize;
-            int m_indexBatch;
 
             Options() {
 #define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) \

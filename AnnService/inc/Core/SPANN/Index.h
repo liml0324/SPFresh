@@ -248,8 +248,6 @@ namespace SPTAG
             uint32_t m_reAssignNum{0};
             uint32_t m_garbageNum{0};
             std::atomic_uint64_t m_reAssignScanNum{0};
-            std::vector<SizeType> SimplyCountSplit;
-            std::vector<SizeType> m_totalReplicaCount;
             std::mutex m_dataAddLock;
 
         public:
@@ -390,6 +388,11 @@ namespace SPTAG
             int getGarbageNum() {return m_garbageNum;}
 
             unsigned long getReAssignScanNum() {return m_reAssignScanNum.load();}
+
+            void GetSomeMemorySize() {
+                double atomicIntSize = sizeof(std::atomic_uint32_t) * m_options.m_maxHeadNode / 1024;
+                LOG(Helper::LogLevel::LL_Info,"Atomic Posting Size Counter: %.6lf KB\n", atomicIntSize);
+            }
 
             void UpdateStop()
             {
@@ -562,9 +565,6 @@ namespace SPTAG
                 std::vector<std::set<SizeType>> vectorHeadMap(vectorNum);
                 std::vector<bool> vectorFoundMap(vectorNum);
                 std::vector<std::string> vectorIdValueMap(vectorNum);
-                for (int i = 0; i < vectorNum; i++) {
-                    m_totalReplicaCount[i] = 0;
-                }
                 for (int i = 0; i < m_index->GetNumSamples(); i++) {
                     std::string postingList;
                     if (!m_index->ContainSample(i)) continue;
@@ -574,7 +574,6 @@ namespace SPTAG
                     for (int j = 0; j < postVectorNum; j++) {
                         uint8_t* vectorId = postingP + j * (m_options.m_dim * sizeof(T) + m_metaDataSize);
                         SizeType vid = *(reinterpret_cast<SizeType*>(vectorId));
-                        m_totalReplicaCount[vid]++;
                         if (m_versionMap.Contains(vid)) continue;
                         vectorHeadMap[vid].insert(i);
                         if (vectorFoundMap[vid]) continue;
