@@ -63,10 +63,12 @@ namespace SPTAG
                         LOG(Helper::LogLevel::LL_Error, "Fail to read truth file!\n");
                         exit(1);
                     }
+                    LOG(Helper::LogLevel::LL_Error, "row: %d, dim: %d\n", row, originalK);
                 }
                 truth.clear();
                 truth.resize(p_iTruthNumber);
                 std::vector<int> vec(originalK);
+                LOG(Helper::LogLevel::LL_Error, "K: %d, OriginalK: %d\n", K, originalK);
                 for (int i = 0; i < p_iTruthNumber; i++)
                 {
                     if (ptr->ReadBinary(4 * originalK, (char*)vec.data()) != 4 * originalK) {

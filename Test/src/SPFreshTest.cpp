@@ -181,13 +181,9 @@ namespace SPTAG {
                         for (int j = 0; j < K; j++)
                         {
                             if (visited[j] || results[i].GetResult(j)->VID < 0) continue;
-
                             if (vectorSet != nullptr) {
                                 float dist = results[i].GetResult(j)->Dist;
                                 float truthDist = COMMON::DistanceUtils::ComputeDistance((const T*)querySet->GetVector(i), (const T*)vectorSet->GetVector(id), vectorSet->Dimension(), index->GetDistCalcMethod());
-                                // if (id >= 500000) {
-                                //     LOG(Helper::LogLevel::LL_Info, "ann: %d@%f, truth: %d@%f\n", results[i].GetResult(j)->VID, dist, id, truthDist);
-                                // }
                                 if (index->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine && fabs(dist - truthDist) < Epsilon) {
                                     thisrecall[i] += 1;
                                     visited[j] = true;
@@ -496,15 +492,24 @@ namespace SPTAG {
 
             void LoadTruth(SPANN::Options& p_opts, std::vector<std::set<SizeType>>& truth, int numQueries, std::string truthfilename, int truthK)
             {
-                LOG(Helper::LogLevel::LL_Info, "Start loading TruthFile...\n");
                 auto ptr = f_createIO();
-                
-                if (ptr == nullptr || !ptr->Initialize(truthfilename.c_str(), std::ios::in | std::ios::binary)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed open truth file: %s\n", truthfilename.c_str());
-                    exit(1);
-                }    
-                int originalK = truthK;
-                COMMON::TruthSet::LoadTruth(ptr, truth, numQueries, originalK, truthK, p_opts.m_truthType);
+                if (p_opts.m_update) {
+                    LOG(Helper::LogLevel::LL_Info, "Start loading TruthFile...: %s\n", truthfilename.c_str());
+                    
+                    if (ptr == nullptr || !ptr->Initialize(truthfilename.c_str(), std::ios::in | std::ios::binary)) {
+                        LOG(Helper::LogLevel::LL_Error, "Failed open truth file: %s\n", truthfilename.c_str());
+                        exit(1);
+                    }
+                } else {
+                    LOG(Helper::LogLevel::LL_Info, "Start loading TruthFile...: %s\n", p_opts.m_truthPath.c_str());
+                    
+                    if (ptr == nullptr || !ptr->Initialize(p_opts.m_truthPath.c_str(), std::ios::in | std::ios::binary)) {
+                        LOG(Helper::LogLevel::LL_Error, "Failed open truth file: %s\n", truthfilename.c_str());
+                        exit(1);
+                    }
+                }
+                LOG(Helper::LogLevel::LL_Error, "K: %d, TruthResultNum: %d\n", p_opts.m_resultNum, p_opts.m_truthResultNum);    
+                COMMON::TruthSet::LoadTruth(ptr, truth, numQueries, p_opts.m_truthResultNum, p_opts.m_resultNum, p_opts.m_truthType);
                 char tmp[4];
                 if (ptr->ReadBinary(4, tmp) == 4) {
                     LOG(Helper::LogLevel::LL_Error, "Truth number is larger than query number(%d)!\n", numQueries);
@@ -553,10 +558,10 @@ namespace SPTAG {
                 if (p_opts.m_calTruth)
                 {
                     std::vector<std::set<SizeType>> truth;
-                    // int truthK = p_opts.m_resultNum;
-                    // LoadTruth(p_opts, truth, numQueries, GetTruthFileName(p_opts.m_truthFilePrefix, curCount), truthK);
-                    // CalculateRecallSPFresh<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, p_opts.m_resultNum, truthK, querySet, vectorSet, numQueries);
-                    OutputResult<ValueType>(GetTruthFileName(p_opts.m_searchResult, curCount), results, p_opts.m_resultNum);
+                    int truthK = p_opts.m_resultNum;
+                    LoadTruth(p_opts, truth, numQueries, GetTruthFileName(p_opts.m_truthFilePrefix, curCount), truthK);
+                    CalculateRecallSPFresh<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, p_opts.m_resultNum, truthK, querySet, vectorSet, numQueries);
+                    // OutputResult<ValueType>(GetTruthFileName(p_opts.m_searchResult, curCount), results, p_opts.m_resultNum);
                 }
             }
 
