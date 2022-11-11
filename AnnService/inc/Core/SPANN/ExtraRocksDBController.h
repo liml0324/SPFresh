@@ -12,6 +12,7 @@
 #include "inc/Helper/KeyValueIO.h"
 
 #include "rocksdb/db.h"
+#include "rocksdb/filter_policy.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/options.h"
 #include "rocksdb/merge_operator.h"
@@ -51,6 +52,14 @@ namespace SPTAG::SPANN
             dbOptions.IncreaseParallelism();
             dbOptions.OptimizeLevelStyleCompaction();
             dbOptions.merge_operator.reset(new AnnMergeOperator);
+
+            // SST file size options
+            // dbOptions.target_file_size_base = 1024UL * 1024 * 1024;
+            // dbOptions.target_file_size_multiplier = 2;
+
+            // compression options
+            // dbOptions.compression = rocksdb::CompressionType::kLZ4Compression;
+            // dbOptions.bottommost_compression = rocksdb::CompressionType::kZSTD;
             
             if (usdDirectIO) {
                 dbOptions.use_direct_io_for_flush_and_compaction = true;
@@ -59,6 +68,11 @@ namespace SPTAG::SPANN
             
             rocksdb::BlockBasedTableOptions table_options;
             table_options.no_block_cache = true;
+
+            // filter options
+            // table_options.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10, true));
+            // table_options.optimize_filters_for_memory = true;
+
             dbOptions.table_factory.reset(rocksdb::NewBlockBasedTableFactory(table_options));
 
             auto s = rocksdb::DB::Open(dbOptions, dbPath, &db);
