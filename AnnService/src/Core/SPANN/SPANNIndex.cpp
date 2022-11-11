@@ -1014,17 +1014,17 @@ namespace SPTAG
             int numClusters = SPTAG::COMMON::KmeansClustering(smallSample, localIndices, 0, (SizeType)localIndices.size(), args, 1000, 100.0F, false, nullptr, m_options.m_virtualHead);
             if (numClusters <= 1)
             {
-                LOG(Helper::LogLevel::LL_Info, "Cluserting Failed\n");
+                LOG(Helper::LogLevel::LL_Info, "Cluserting Failed (The same vector), Cut to limit\n");
                 postingList.clear();
-                for (int j = 0; j < realVectorNum; j++)
+                for (int j = 0; j < m_extraSearcher->GetPostingSizeLimit(); j++)
                 {
                     postingList += Helper::Convert::Serialize<int>(&localIndicesInsert[j], 1);
                     postingList += Helper::Convert::Serialize<uint8_t>(&localIndicesInsertVersion[j], 1);
                     // postingList += Helper::Convert::Serialize<float>(&localIndicesInsertFloat[j], 1);
                     postingList += Helper::Convert::Serialize<ValueType>(vectorBuffer.get() + j * m_options.m_dim * sizeof(ValueType), m_options.m_dim);
                 }
-                m_postingSizes[headID].store(realVectorNum);
-                m_extraSearcher->AddIndex(headID, postingList);
+                m_postingSizes[headID].store(m_extraSearcher->GetPostingSizeLimit());
+                m_extraSearcher->OverrideIndex(headID, postingList);
                 return ErrorCode::Success;
             }
 
