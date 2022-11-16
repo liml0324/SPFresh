@@ -95,6 +95,8 @@ namespace SPTAG::SPANN
             if (s == rocksdb::Status::OK()) {
                 return ErrorCode::Success;
             } else {
+                auto key_int = Helper::Convert::Unserialize<SizeType>(key);
+                LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in Get\e[0m: %s, key: %d\n", s.getState(), *(key_int.get()));
                 return ErrorCode::Fail;
             }
         }
@@ -150,6 +152,8 @@ namespace SPTAG::SPANN
             if (s == rocksdb::Status::OK()) {
                 return ErrorCode::Success;
             } else {
+                auto key_int = Helper::Convert::Unserialize<SizeType>(key);
+                LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in Put\e[0m: %s, key: %d\n", s.getState(), *(key_int.get()));
                 return ErrorCode::Fail;
             }
         }
@@ -195,6 +199,7 @@ namespace SPTAG::SPANN
             if (s == rocksdb::Status::OK()) {
                 return ErrorCode::Success;
             } else {
+                LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in Merge\e[0m: %s, key: %d\n", s.getState(), key);
                 return ErrorCode::Fail;
             }
         }
