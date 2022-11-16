@@ -953,7 +953,10 @@ namespace SPTAG
             }
             m_splitTaskNum++;
             std::string postingList;
-            m_extraSearcher->SearchIndex(headID, postingList);
+            if (m_extraSearcher->SearchIndex(headID, postingList) != ErrorCode::Success) {
+                LOG(Helper::LogLevel::LL_Info, "Split fail to get oversized postings\n");
+                exit(0);
+            }
             postingList += appendPosting;
             // reinterpret postingList to vectors and IDs
             auto* postingP = reinterpret_cast<uint8_t*>(&postingList.front());
@@ -998,7 +1001,10 @@ namespace SPTAG
                     postingList += Helper::Convert::Serialize<ValueType>(vectorBuffer.get() + j * m_options.m_dim * sizeof(ValueType), m_options.m_dim);
                 }
                 m_postingSizes[headID].store(realVectorNum);
-                m_extraSearcher->OverrideIndex(headID, postingList);
+                if (m_extraSearcher->OverrideIndex(headID, postingList) != ErrorCode::Success ) {
+                    LOG(Helper::LogLevel::LL_Info, "Split Fail to write back postings\n");
+                    exit(0);
+                }
                 m_garbageNum++;
                 // m_splitWriteBackCost += sw.getElapsedMs() - gcEndTime;
                 return ErrorCode::Success;
@@ -1024,7 +1030,10 @@ namespace SPTAG
                     postingList += Helper::Convert::Serialize<ValueType>(vectorBuffer.get() + j * m_options.m_dim * sizeof(ValueType), m_options.m_dim);
                 }
                 m_postingSizes[headID].store(m_extraSearcher->GetPostingSizeLimit());
-                m_extraSearcher->OverrideIndex(headID, postingList);
+                if (m_extraSearcher->OverrideIndex(headID, postingList) != ErrorCode::Success) {
+                    LOG(Helper::LogLevel::LL_Info, "Split fail to override postings cut to limit\n");
+                    exit(0);
+                }
                 return ErrorCode::Success;
             }
 
@@ -1048,7 +1057,10 @@ namespace SPTAG
                         // postingList += Helper::Convert::Serialize<float>(&localIndicesInsertFloat[localIndices[first + j]], 1);
                         postingList += Helper::Convert::Serialize<ValueType>(smallSample[localIndices[first + j]], m_options.m_dim);
                     }
-                    m_extraSearcher->OverrideIndex(newHeadVID, postingList);
+                    if (m_extraSearcher->OverrideIndex(newHeadVID, postingList) != ErrorCode::Success) {
+                        LOG(Helper::LogLevel::LL_Info, "Fail to override postings\n");
+                        exit(0);
+                    }
                     m_theSameHeadNum++;
                 }
                 else {
@@ -1065,7 +1077,10 @@ namespace SPTAG
                         // postingList += Helper::Convert::Serialize<float>(&dist, 1);
                         postingList += Helper::Convert::Serialize<ValueType>(smallSample[localIndices[first + j]], m_options.m_dim);
                     }
-                    m_extraSearcher->AddIndex(newHeadVID, postingList);
+                    if (m_extraSearcher->AddIndex(newHeadVID, postingList) != ErrorCode::Success) {
+                        LOG(Helper::LogLevel::LL_Info, "Fail to add new postings\n");
+                        exit(0);
+                    }
                     m_index->AddIndexIdx(begin, end);
                 }
                 newPostingLists.push_back(postingList);
@@ -1127,7 +1142,10 @@ namespace SPTAG
                     }
                 }
                 std::vector<std::string> tempPostingLists;
-                m_extraSearcher->SearchIndexMulti(HeadPrevTopK, &tempPostingLists);
+                if (m_extraSearcher->SearchIndexMulti(HeadPrevTopK, &tempPostingLists) != ErrorCode::Success) {
+                    LOG(Helper::LogLevel::LL_Info, "ReAssign can't get all the near postings\n");
+                    exit(0);
+                }
                 for (int i = 0; i < HeadPrevTopK.size(); i++) {
                     postingLists.push_back(tempPostingLists[i]);
                 }
@@ -1349,6 +1367,7 @@ namespace SPTAG
                     // LOG(Helper::LogLevel::LL_Info, "Merge: headID: %d, appendNum:%d\n", headID, appendNum);
                     if (m_extraSearcher->AppendPosting(headID, appendPosting) != ErrorCode::Success) {
                         LOG(Helper::LogLevel::LL_Error, "Merge failed!\n");
+                        exit(1);
                     }
                     m_postingSizes[headID].fetch_add(appendNum, std::memory_order_relaxed);
                 }

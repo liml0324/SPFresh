@@ -557,11 +557,11 @@ namespace SPTAG {
 
                 if (p_opts.m_calTruth)
                 {
-                    std::vector<std::set<SizeType>> truth;
-                    int truthK = p_opts.m_resultNum;
-                    LoadTruth(p_opts, truth, numQueries, GetTruthFileName(p_opts.m_truthFilePrefix, curCount), truthK);
-                    CalculateRecallSPFresh<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, p_opts.m_resultNum, truthK, querySet, vectorSet, numQueries);
-                    // OutputResult<ValueType>(GetTruthFileName(p_opts.m_searchResult, curCount), results, p_opts.m_resultNum);
+                    // std::vector<std::set<SizeType>> truth;
+                    // int truthK = p_opts.m_resultNum;
+                    // LoadTruth(p_opts, truth, numQueries, GetTruthFileName(p_opts.m_truthFilePrefix, curCount), truthK);
+                    // CalculateRecallSPFresh<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, p_opts.m_resultNum, truthK, querySet, vectorSet, numQueries);
+                    OutputResult<ValueType>(GetTruthFileName(p_opts.m_searchResult, curCount), results, p_opts.m_resultNum);
                 }
             }
 
@@ -655,6 +655,8 @@ namespace SPTAG {
                 int curCount = p_index->GetNumSamples();
                 int insertCount = vectorSet->Count() - curCount;
 
+                bool calTruthOrigin = p_opts.m_calTruth;
+
                 if (p_opts.m_endVectorNum != -1)
                 {
                     insertCount = p_opts.m_endVectorNum - curCount;
@@ -714,7 +716,7 @@ namespace SPTAG {
                     finishedInsert += step;
                     LOG(Helper::LogLevel::LL_Info, "Total Vector num %d \n", curCount);
 
-                    p_opts.m_calTruth = true;
+                    p_opts.m_calTruth = calTruthOrigin;
                     if (p_opts.m_maxInternalResultNum != -1) 
                     {
                         for (int iterInternalResultNum = p_opts.m_minInternalResultNum; iterInternalResultNum <= p_opts.m_maxInternalResultNum; iterInternalResultNum += p_opts.m_stepInternalResultNum) 

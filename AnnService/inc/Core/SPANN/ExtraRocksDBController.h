@@ -44,36 +44,37 @@ namespace SPTAG::SPANN
             delete db;
         }
 
-        bool Initialize(const char* filePath, bool usdDirectIO) override
+        bool Initialize(const char* filePath, bool usdDirectIO, bool wal = false) override
         {
             dbPath = std::string(filePath);
             //dbOptions.statistics = rocksdb::CreateDBStatistics();
             dbOptions.create_if_missing = true;
-            dbOptions.IncreaseParallelism();
-            dbOptions.OptimizeLevelStyleCompaction();
-            dbOptions.merge_operator.reset(new AnnMergeOperator);
+            if (!wal) {
+                dbOptions.IncreaseParallelism();
+                dbOptions.OptimizeLevelStyleCompaction();
+                dbOptions.merge_operator.reset(new AnnMergeOperator);
 
-            // SST file size options
-            // dbOptions.target_file_size_base = 1024UL * 1024 * 1024;
-            // dbOptions.target_file_size_multiplier = 2;
+                // SST file size options
+                // dbOptions.target_file_size_base = 1024UL * 1024 * 1024;
+                // dbOptions.target_file_size_multiplier = 2;
 
-            // compression options
-            // dbOptions.compression = rocksdb::CompressionType::kLZ4Compression;
-            // dbOptions.bottommost_compression = rocksdb::CompressionType::kZSTD;
+                // compression options
+                // dbOptions.compression = rocksdb::CompressionType::kLZ4Compression;
+                // dbOptions.bottommost_compression = rocksdb::CompressionType::kZSTD;
+                rocksdb::BlockBasedTableOptions table_options;
+                table_options.no_block_cache = true;
+
+                // filter options
+                // table_options.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10, true));
+                // table_options.optimize_filters_for_memory = true;
+
+                dbOptions.table_factory.reset(rocksdb::NewBlockBasedTableFactory(table_options));
+            }
             
             if (usdDirectIO) {
                 dbOptions.use_direct_io_for_flush_and_compaction = true;
                 dbOptions.use_direct_reads = true;
             }
-            
-            rocksdb::BlockBasedTableOptions table_options;
-            table_options.no_block_cache = true;
-
-            // filter options
-            // table_options.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10, true));
-            // table_options.optimize_filters_for_memory = true;
-
-            dbOptions.table_factory.reset(rocksdb::NewBlockBasedTableFactory(table_options));
 
             auto s = rocksdb::DB::Open(dbOptions, dbPath, &db);
             LOG(Helper::LogLevel::LL_Info, "SPFresh: New Rocksdb: %s\n", filePath);
