@@ -69,6 +69,7 @@ namespace SPTAG::SPANN
                 // table_options.optimize_filters_for_memory = true;
 
                 dbOptions.table_factory.reset(rocksdb::NewBlockBasedTableFactory(table_options));
+                dbOptions.statistics = rocksdb::CreateDBStatistics();
             }
             
             if (usdDirectIO) {
@@ -231,6 +232,14 @@ namespace SPTAG::SPANN
             LOG(Helper::LogLevel::LL_Info, "RocksDB Status:\n%s", stats.c_str());
             */
         }
+
+        void GetDBStat() {
+            if (dbOptions.statistics != nullptr)
+                LOG(Helper::LogLevel::LL_Info, "RocksDB statistics:\n %s\n", dbOptions.statistics->ToString().c_str());
+            else 
+                LOG(Helper::LogLevel::LL_Info, "DB statistics not set!\n");
+        }
+
     private:
         std::string dbPath;
         rocksdb::DB* db{};
@@ -586,6 +595,7 @@ namespace SPTAG::SPANN
         }
 
         void ForceCompaction() override { db.ForceCompaction(); }
+        void GetDBStats() override { db.GetDBStat(); }
 
         inline ErrorCode SearchIndex(SizeType headID, std::string& posting) override {  return db.Get(headID, &posting); }
         inline ErrorCode AddIndex(SizeType headID, const std::string& posting) override { m_postingNum++; return db.Put(headID, posting); }

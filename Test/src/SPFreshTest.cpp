@@ -664,6 +664,8 @@ namespace SPTAG {
 
                 p_index->ForceCompaction();
 
+                p_index->GetDBStat();
+
                 if (!p_opts.m_onlySearchFinalBatch) {
                     if (p_opts.m_maxInternalResultNum != -1) 
                     {
@@ -680,6 +682,7 @@ namespace SPTAG {
 
                 ShowMemoryStatus(vectorSet, sw.getElapsedSec());
                 p_index->GetSomeMemorySize();
+                p_index->GetDBStat();
 
                 int batch;
                 if (step == 0) {
@@ -709,8 +712,9 @@ namespace SPTAG {
                     do {
                         insert_status = insert_future.wait_for(std::chrono::milliseconds(1000));
                         if (insert_status == std::future_status::timeout) {
-                            // ShowMemoryStatus(vectorSet, sw.getElapsedSec());
+                            ShowMemoryStatus(vectorSet, sw.getElapsedSec());
                             if(p_opts.m_searchDuringUpdate) StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, curCount, p_opts, sw.getElapsedSec());
+                            p_index->GetDBStat();
                         }
                     }while (insert_status != std::future_status::ready);
 

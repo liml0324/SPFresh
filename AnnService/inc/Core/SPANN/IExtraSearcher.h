@@ -199,6 +199,7 @@ namespace SPTAG {
             virtual SizeType  GetPostingSizeLimit() = 0;
             virtual SizeType  GetMetaDataSize() = 0;
             virtual ErrorCode SearchIndexMulti(const std::vector<SizeType>& keys, std::vector<std::string>* values) = 0;
+            virtual void GetDBStats() = 0;
         };
     } // SPANN
 } // SPTAG

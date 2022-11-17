@@ -936,6 +936,11 @@ namespace SPTAG
                 }
                 return;
             }
+
+            void GetDBStat() 
+            {
+                m_extraSearcher->GetDBStats();
+            }
         };
     } // namespace SPANN
 } // namespace SPTAG
