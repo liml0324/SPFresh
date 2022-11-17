@@ -418,12 +418,12 @@ namespace SPTAG
                 LOG(Helper::LogLevel::LL_Info, "Preparation done, start candidate searching.\n");
 
                 std::vector<std::thread> threads;
-                threads.reserve(64);
+                threads.reserve(m_options.m_iSSDNumberOfThreads);
 
                 std::atomic_int nextFullID(0);
                 std::atomic_size_t rngFailedCountTotal(0);
 
-                for (int tid = 0; tid < 64; ++tid)
+                for (int tid = 0; tid <  m_options.m_iSSDNumberOfThreads; ++tid)
                 {
                     threads.emplace_back([&, tid]()
                         {
@@ -504,7 +504,7 @@ namespace SPTAG
                         });
                 }
 
-                for (int tid = 0; tid < 64; ++tid)
+                for (int tid = 0; tid < m_options.m_iSSDNumberOfThreads; ++tid)
                 {
                     threads[tid].join();
                 }
@@ -521,6 +521,35 @@ namespace SPTAG
                     }
 
                     LOG(Helper::LogLevel::LL_Info, "Before Posting Cut:\n");
+                    for (int i = 0; i < replicaCountDist.size(); ++i)
+                    {
+                        LOG(Helper::LogLevel::LL_Info, "Replica Count Dist: %d, %d\n", i, replicaCountDist[i]);
+                    }
+                }
+
+                #pragma omp parallel for schedule(dynamic)
+                for (int i = 0; i < postingListSize.size(); ++i)
+                {
+                    if (postingListSize[i] <= m_extraSearcher->GetPostingSizeLimit()) continue;
+
+                    std::size_t selectIdx = std::lower_bound(selections.begin(), selections.end(), i, g_edgeComparerInsert) - selections.begin();
+
+                    for (size_t dropID = m_extraSearcher->GetPostingSizeLimit(); dropID < postingListSize[i]; ++dropID)
+                    {
+                        int tonode = selections[selectIdx + dropID].fullID;
+                        --replicaCount[tonode];
+                    }
+                    postingListSize[i] = m_extraSearcher->GetPostingSizeLimit();
+                }
+
+                {
+                    std::vector<int> replicaCountDist(m_options.m_replicaCount + 1, 0);
+                    for (int i = 0; i < replicaCount.size(); ++i)
+                    {
+                        ++replicaCountDist[replicaCount[i]];
+                    }
+
+                    LOG(Helper::LogLevel::LL_Info, "After Posting Cut:\n");
                     for (int i = 0; i < replicaCountDist.size(); ++i)
                     {
                         LOG(Helper::LogLevel::LL_Info, "Replica Count Dist: %d, %d\n", i, replicaCountDist[i]);
@@ -784,13 +813,128 @@ namespace SPTAG
                 return true;
             }
 
-            int GetNextAssignment()
+            int GetNextAssignment() 
             {
                 int assignId;
                 if (m_assignmentQueue.try_pop(assignId)) {
                     return assignId;
                 }
                 return -1;
+            }
+
+            void CalculatePostingDistribution()
+            {
+                int top = m_extraSearcher->GetPostingSizeLimit() / 10 + 1;
+                int page = m_options.m_postingPageLimit + 1;
+                std::vector<int> lengthDistribution(top, 0);
+                std::vector<int> sizeDistribution(page + 2, 0);
+                size_t vectorInfoSize = m_options.m_dim * sizeof(T) + m_metaDataSize;
+                int deletedHead = 0;
+                for (int i = 0; i < m_index->GetNumSamples(); i++) {
+                    if (!m_index->ContainSample(i)) deletedHead++;
+                    lengthDistribution[m_postingSizes[i]/10]++;
+                    int size = m_postingSizes[i] * vectorInfoSize;
+                    if (size < PageSize) {
+                        if (size < 512) sizeDistribution[0]++;
+                        else if (size < 1024) sizeDistribution[1]++;
+                        else sizeDistribution[2]++;
+                    } else {
+                        sizeDistribution[size/PageSize + 2]++;
+                    }
+                }
+                LOG(Helper::LogLevel::LL_Info, "Posting Length (Vector Num):\n");
+                for (int i = 0; i < top; ++i)
+                {
+                    LOG(Helper::LogLevel::LL_Info, "%d ~ %d: %d, \n", i * 10, (i + 1) * 10 - 1, lengthDistribution[i]);
+                }
+                LOG(Helper::LogLevel::LL_Info, "Posting Length (Data Size):\n");
+                for (int i = 0; i < page + 2; ++i)
+                {
+                    if (i <= 2) {
+                        if (i == 0) LOG(Helper::LogLevel::LL_Info, "0 ~ 512 B: %d, \n", sizeDistribution[0] - deletedHead);
+                        else if (i == 1) LOG(Helper::LogLevel::LL_Info, "512 B ~ 1 KB: %d, \n", sizeDistribution[1]);
+                        else LOG(Helper::LogLevel::LL_Info, "1 KB ~ 4 KB: %d, \n", sizeDistribution[2]);
+                    }
+                    else
+                        LOG(Helper::LogLevel::LL_Info, "%d ~ %d KB: %d, \n", (i - 2) * 4, (i - 1) * 4, sizeDistribution[i]);
+                }
+            }
+
+            void PreReassign(std::shared_ptr<Helper::VectorSetReader>& p_reader) 
+            {
+                std::atomic_bool doneReassign = false;
+                while (!doneReassign) {
+                    doneReassign = true;
+                    std::vector<std::thread> threads;
+                    std::atomic_int nextPostingID(0);
+                    int currentPostingNum = m_index->GetNumSamples();
+                    int limit = m_extraSearcher->GetPostingSizeLimit() * m_options.m_preReassignRatio;
+                    LOG(Helper::LogLevel::LL_Info,"Batch PreReassign, Current PostingNum: %d, Current Limit: %d\n", currentPostingNum, limit);
+                    auto func = [&]()
+                    {
+                        int index = 0;
+                        while (true)
+                        {
+                            index = nextPostingID.fetch_add(1);
+                            if (index < currentPostingNum) 
+                            {
+                                if (m_index->ContainSample(index)) 
+                                {
+                                    if (m_postingSizes[index].load() >= limit) 
+                                    {
+                                        doneReassign = false;
+                                        std::string postingList;
+                                        m_extraSearcher->SearchIndex(index, postingList);
+                                        auto* postingP = reinterpret_cast<uint8_t*>(&postingList.front());
+                                        size_t vectorInfoSize = m_options.m_dim * sizeof(T) + m_metaDataSize;
+                                        size_t postVectorNum = postingList.size() / vectorInfoSize;
+                                        COMMON::Dataset<T> smallSample;  // smallSample[i] -> VID
+                                        std::shared_ptr<uint8_t> vectorBuffer(new uint8_t[m_options.m_dim * sizeof(T) * postVectorNum], std::default_delete<uint8_t[]>());
+                                        std::vector<int> localIndices(postVectorNum);
+                                        auto vectorBuf = vectorBuffer.get();
+                                        for (int j = 0; j < postVectorNum; j++)
+                                        {
+                                            uint8_t* vectorId = postingP + j * vectorInfoSize;
+                                            localIndices[j] = j;
+                                            memcpy(vectorBuf, vectorId + m_metaDataSize, m_options.m_dim * sizeof(T));
+                                            vectorBuf += m_options.m_dim * sizeof(T);
+                                        }
+                                        smallSample.Initialize(postVectorNum, m_options.m_dim, m_index->m_iDataBlockSize, m_index->m_iDataCapacity, reinterpret_cast<T*>(vectorBuffer.get()), false);
+                                        SPTAG::COMMON::KmeansArgs<T> args(2, smallSample.C(), (SizeType)localIndices.size(), 1, m_index->GetDistCalcMethod());
+                                        std::shuffle(localIndices.begin(), localIndices.end(), std::mt19937(std::random_device()()));
+                                        int numClusters = SPTAG::COMMON::KmeansClustering(smallSample, localIndices, 0, (SizeType)localIndices.size(), args, 1000, 100.0F, false, nullptr, m_options.m_virtualHead);
+                                        bool theSameHead = false;
+                                        for (int k = 0; k < 2; k++) {
+                                            if (args.counts[k] == 0)	continue;
+                                            if (!theSameHead && m_index->ComputeDistance(args.centers + k * args._D, m_index->GetSample(index)) < Epsilon) {
+                                                theSameHead = true;
+                                            }
+                                            else {
+                                                int begin, end = 0;
+                                                m_index->AddIndexId(args.centers + k * args._D, 1, m_options.m_dim, begin, end);
+                                                if (begin == m_options.m_maxHeadNode) exit(0);
+                                                m_index->AddIndexIdx(begin, end);
+                                            }
+                                        }
+                                        if (!theSameHead) {
+                                            m_index->DeleteIndex(index);
+                                        }
+                                    }
+                                }
+                            }
+                            else 
+                            {
+                                return;
+                            }
+                        }
+                    };
+                    for (int j = 0; j < m_options.m_iSSDNumberOfThreads; j++) { threads.emplace_back(func); }
+                    for (auto& thread : threads) { thread.join(); }
+                    Rebuild(p_reader);
+                    ForceCompaction();
+                    CalculatePostingDistribution();
+                }
+                return;
             }
         };
     } // namespace SPANN
