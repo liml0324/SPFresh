@@ -15,7 +15,7 @@ namespace SPTAG
         {
         private:
             std::atomic<SizeType> m_inserted;
-            Dataset<std::int8_t> m_data;
+            Dataset<std::uint8_t> m_data;
             
         public:
             VersionLabel() 
@@ -38,7 +38,7 @@ namespace SPTAG
 
             inline bool Delete(const SizeType& key)
             {
-                char oldvalue = InterlockedExchange8((char*)m_data[key], 1);
+                char oldvalue = InterlockedExchange8(m_data[key], 1);
                 if (oldvalue == 1) return false;
                 m_inserted++;
                 return true;
@@ -49,22 +49,32 @@ namespace SPTAG
                 return (*m_data[key] + 1) & 0x7f;
             }
 
-            inline bool UpdateVersion(const SizeType& key, const uint8_t newVersion)
+            inline bool UpdateVersion(const SizeType& key, uint8_t newVersion)
             {
-                if (Contains(key)) return false;
-                char oldVersion = InterlockedExchange8((char*)m_data[key], ((newVersion - 1) & 0x7f) | 0x80);
-                if (oldVersion == 1) {
-                    InterlockedExchange8((char*)m_data[key], 1);
-                    return false;
+                // *m_data[key] = ((newVersion - 1) & 0x7f) | 0x80;
+                while (true) {
+                    if (Contains(key)) return false;
+                    uint8_t oldVersion = GetVersion(key);
+                    uint8_t oldVersionMask = ((oldVersion - 1) & 0x7f) | 0x80;
+                    uint8_t newVersionMask = ((newVersion - 1) & 0x7f) | 0x80;
+                    if (InterlockedCompareExchange(m_data[key], newVersionMask, oldVersionMask) == oldVersionMask) {
+                        return true;
+                    }
                 }
-                return true;
             }
 
             inline bool IncVersion(const SizeType& key, uint8_t* newVersion)
             {
-                uint8_t version = GetVersion(key);
-                *newVersion = version+1;
-                return UpdateVersion(key, version+1);
+                while (true) {
+                    if (Contains(key)) return false;
+                    uint8_t oldVersion = GetVersion(key);
+                    *newVersion = oldVersion+1;
+                    uint8_t oldVersionMask = ((oldVersion - 1) & 0x7f) | 0x80;
+                    uint8_t newVersionMask = ((*newVersion - 1) & 0x7f) | 0x80;
+                    if (InterlockedCompareExchange(m_data[key], newVersionMask, oldVersionMask) == oldVersionMask) {
+                        return true;
+                    }
+                }
             }
 
             inline ErrorCode Save(std::shared_ptr<Helper::DiskPriorityIO> output)

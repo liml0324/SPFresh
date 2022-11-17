@@ -1399,6 +1399,13 @@ namespace SPTAG
                     if (!m_index->ContainSample(headID)) {
                         goto checkDeleted;
                     }
+                    // for (int i = 0; i < appendNum; i++)
+                    // {
+                    //     uint32_t idx = i * vectorInfoSize;
+                    //     uint8_t version = *(uint8_t*)(&appendPosting[idx + sizeof(int)]);
+                    //     LOG(Helper::LogLevel::LL_Info, "Append: VID: %d, current version: %d\n", *(int*)(&appendPosting[idx]), version);
+
+                    // }
                     // LOG(Helper::LogLevel::LL_Info, "Merge: headID: %d, appendNum:%d\n", headID, appendNum);
                     if (m_extraSearcher->AppendPosting(headID, appendPosting) != ErrorCode::Success) {
                         LOG(Helper::LogLevel::LL_Error, "Merge failed!\n");

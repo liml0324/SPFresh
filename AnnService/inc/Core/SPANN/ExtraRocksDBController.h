@@ -69,7 +69,7 @@ namespace SPTAG::SPANN
                 // table_options.optimize_filters_for_memory = true;
 
                 dbOptions.table_factory.reset(rocksdb::NewBlockBasedTableFactory(table_options));
-                dbOptions.statistics = rocksdb::CreateDBStatistics();
+                // dbOptions.statistics = rocksdb::CreateDBStatistics();
             }
             
             if (usdDirectIO) {

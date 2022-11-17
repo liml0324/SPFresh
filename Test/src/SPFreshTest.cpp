@@ -557,11 +557,11 @@ namespace SPTAG {
 
                 if (p_opts.m_calTruth)
                 {
-                    // std::vector<std::set<SizeType>> truth;
-                    // int truthK = p_opts.m_resultNum;
-                    // LoadTruth(p_opts, truth, numQueries, GetTruthFileName(p_opts.m_truthFilePrefix, curCount), truthK);
-                    // CalculateRecallSPFresh<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, p_opts.m_resultNum, truthK, querySet, vectorSet, numQueries);
-                    OutputResult<ValueType>(GetTruthFileName(p_opts.m_searchResult, curCount), results, p_opts.m_resultNum);
+                    std::vector<std::set<SizeType>> truth;
+                    int truthK = p_opts.m_resultNum;
+                    LoadTruth(p_opts, truth, numQueries, GetTruthFileName(p_opts.m_truthFilePrefix, curCount), truthK);
+                    CalculateRecallSPFresh<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, p_opts.m_resultNum, truthK, querySet, vectorSet, numQueries);
+                    // OutputResult<ValueType>(GetTruthFileName(p_opts.m_searchResult, curCount), results, p_opts.m_resultNum);
                 }
             }
 
@@ -710,7 +710,7 @@ namespace SPTAG {
 
                     p_opts.m_calTruth = false;
                     do {
-                        insert_status = insert_future.wait_for(std::chrono::milliseconds(1000));
+                        insert_status = insert_future.wait_for(std::chrono::milliseconds(3000));
                         if (insert_status == std::future_status::timeout) {
                             ShowMemoryStatus(vectorSet, sw.getElapsedSec());
                             if(p_opts.m_searchDuringUpdate) StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, curCount, p_opts, sw.getElapsedSec());
