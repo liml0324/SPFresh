@@ -86,6 +86,7 @@ namespace SPTAG
             m_index->SetReady(true);
 
             // TODO: Choose an extra searcher based on config
+            // Not Ready
             m_extraSearcher.reset(new ExtraFullGraphSearcher<T>());
             if (!m_extraSearcher->LoadIndex(m_options)) return ErrorCode::Fail;
 
@@ -97,14 +98,6 @@ namespace SPTAG
             m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, min(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
 
             m_versionMap.Load(m_options.m_fullDeletedIDFile, m_index->m_iDataBlockSize, m_index->m_iDataCapacity);
-
-            m_postingSizes = std::make_unique<std::atomic_uint32_t[]>(m_options.m_maxHeadNode);
-
-            for (int idx = 0; idx < m_extraSearcher->GetIndexSize(); idx++) {
-                uint32_t tmp;
-                IOBINARY(p_indexStreams.back(), ReadBinary, sizeof(uint32_t), reinterpret_cast<char*>(&tmp));
-                m_postingSizes[idx].store(tmp);
-            }
 
             return ErrorCode::Success;
         }
@@ -631,66 +624,21 @@ namespace SPTAG
                     //data structrue initialization
                     LOG(Helper::LogLevel::LL_Info, "DataBlockSize: %d, Capacity: %d\n", m_index->m_iDataBlockSize, m_index->m_iDataCapacity);
                     m_versionMap.Load(m_options.m_fullDeletedIDFile, m_index->m_iDataBlockSize, m_index->m_iDataCapacity);
-                    m_postingSizes = std::make_unique<std::atomic_uint32_t[]>(m_options.m_maxHeadNode);
-                    std::ifstream input(m_options.m_ssdInfoFile, std::ios::binary);
-                    if (!input.is_open())
-                    {
-                        fprintf(stderr, "Failed to open file: %s\n", m_options.m_ssdInfoFile.c_str());
-                        exit(1);
-                    }
+                    m_postingSizes.Load(m_options.m_ssdInfoFile, m_index->m_iDataBlockSize, m_index->m_iDataCapacity);
 
-					int vectorNum;
-                    input.read(reinterpret_cast<char*>(&vectorNum), sizeof(vectorNum));
-					m_vectorNum.store(vectorNum);
+					m_vectorNum.store(m_versionMap.GetVectorNum());
 
 					LOG(Helper::LogLevel::LL_Info, "Current vector num: %d.\n", m_vectorNum.load());
 
-					uint32_t postingNum;
-					input.read(reinterpret_cast<char*>(&postingNum), sizeof(postingNum));
+					LOG(Helper::LogLevel::LL_Info, "Current posting num: %d.\n", m_postingSizes.GetPostingNum());
 
-					LOG(Helper::LogLevel::LL_Info, "Current posting num: %d.\n", postingNum);
-
-					for (int idx = 0; idx < postingNum; idx++) {
-						uint32_t tmp;
-						input.read(reinterpret_cast<char*>(&tmp), sizeof(uint32_t));
-						m_postingSizes[idx].store(tmp);
-					}
-
-					input.close();
                     CalculatePostingDistribution();
                     if (m_options.m_preReassign && m_options.m_buildSsdIndex) {
                         PreReassign(p_reader);
                         m_index->SaveIndex(m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder);
                         LOG(Helper::LogLevel::LL_Info, "SPFresh: ReWriting SSD Info\n");
-                        auto ptr = SPTAG::f_createIO();
-                        if (ptr == nullptr || !ptr->Initialize(m_options.m_ssdInfoFile.c_str(), std::ios::binary | std::ios::out)) {
-                            LOG(Helper::LogLevel::LL_Error, "Failed open file %s\n", m_options.m_ssdInfoFile.c_str());
-                            exit(1);
-                        }
-                        //Number of all documents.
-                        int i32Val = static_cast<int>(vectorNum);
-                        if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                            LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndexInfo File!");
-                            exit(1);
-                        }
-                        //Number of postings
-                        i32Val = static_cast<int>(m_index->GetNumSamples());
-
-                        if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                            LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndexInfo File!");
-                            exit(1);
-                        }
-
-                        for(int id = 0; id < m_index->GetNumSamples(); id++)
-                        {
-                            i32Val = m_postingSizes[id].load();
-                            if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                                LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndexInfo File!");
-                                exit(1);
-                            }
-                        }
+                        m_postingSizes.Save(m_options.m_ssdInfoFile);
                     }
-                    //ForceCompaction();
                 }
             }
             
@@ -836,7 +784,7 @@ namespace SPTAG
                     std::lock_guard<std::mutex> lock(m_dataAddLock);
                     auto ret = m_versionMap.AddBatch(1);
                     if (ret == ErrorCode::MemoryOverFlow) {
-                        LOG(Helper::LogLevel::LL_Info, "VID: %d, Map Size:%d\n", VID, m_versionMap.BufferSize());
+                        LOG(Helper::LogLevel::LL_Info, "MemoryOverFlow: VID: %d, Map Size:%d\n", VID, m_versionMap.BufferSize());
                         exit(1);
                     }
                     //m_reassignedID.AddBatch(1);
@@ -983,7 +931,7 @@ namespace SPTAG
         {
             // TimeUtils::StopW sw;
             std::unique_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]);
-            if (m_postingSizes[headID].load() + appendNum < m_extraSearcher->GetPostingSizeLimit()) {
+            if (m_postingSizes.GetSize(headID) + appendNum < m_extraSearcher->GetPostingSizeLimit()) {
                 return ErrorCode::FailSplit;
             }
             m_splitTaskNum++;
@@ -1035,7 +983,7 @@ namespace SPTAG
                     // postingList += Helper::Convert::Serialize<float>(&localIndicesInsertFloat[j], 1);
                     postingList += Helper::Convert::Serialize<ValueType>(vectorBuffer.get() + j * m_options.m_dim * sizeof(ValueType), m_options.m_dim);
                 }
-                m_postingSizes[headID].store(realVectorNum);
+                m_postingSizes.UpdateSize(headID, realVectorNum);
                 if (m_extraSearcher->OverrideIndex(headID, postingList) != ErrorCode::Success ) {
                     LOG(Helper::LogLevel::LL_Info, "Split Fail to write back postings\n");
                     exit(0);
@@ -1064,7 +1012,7 @@ namespace SPTAG
                     // postingList += Helper::Convert::Serialize<float>(&localIndicesInsertFloat[j], 1);
                     postingList += Helper::Convert::Serialize<ValueType>(vectorBuffer.get() + j * m_options.m_dim * sizeof(ValueType), m_options.m_dim);
                 }
-                m_postingSizes[headID].store(m_extraSearcher->GetPostingSizeLimit());
+                m_postingSizes.UpdateSize(headID, m_extraSearcher->GetPostingSizeLimit());
                 if (m_extraSearcher->OverrideIndex(headID, postingList) != ErrorCode::Success) {
                     LOG(Helper::LogLevel::LL_Info, "Split fail to override postings cut to limit\n");
                     exit(0);
@@ -1102,7 +1050,6 @@ namespace SPTAG
                     int begin, end = 0;
                     m_index->AddIndexId(args.centers + k * args._D, 1, m_options.m_dim, begin, end);
                     newHeadVID = begin;
-                    if (begin == m_options.m_maxHeadNode) exit(0);
                     newHeadsID.push_back(begin);
                     for (int j = 0; j < args.counts[k]; j++)
                     {
@@ -1121,12 +1068,19 @@ namespace SPTAG
                 newPostingLists.push_back(postingList);
                 // LOG(Helper::LogLevel::LL_Info, "Head id: %d split into : %d, length: %d\n", headID, newHeadVID, args.counts[k]);
                 first += args.counts[k];
-                m_postingSizes[newHeadVID] = args.counts[k];
+                {
+                    std::lock_guard<std::mutex> lock(m_dataAddLock);
+                    auto ret = m_postingSizes.AddBatch(1);
+                    if (ret == ErrorCode::MemoryOverFlow) {
+                        LOG(Helper::LogLevel::LL_Info, "MemoryOverFlow: NnewHeadVID: %d, Map Size:%d\n", newHeadVID, m_postingSizes.BufferSize());
+                        exit(1);
+                    }
+                }
+                m_postingSizes.UpdateSize(newHeadVID, args.counts[k]);
             }
             if (!theSameHead) {
                 m_index->DeleteIndex(headID);
-                // m_extraSearcher->DeleteIndex(headID);
-                m_postingSizes[headID] = 0;
+                m_postingSizes.UpdateSize(headID, 0);
             }
             lock.unlock();
             int split_order = ++m_splitNum;
@@ -1386,14 +1340,11 @@ namespace SPTAG
                 }
                 return ErrorCode::Undefined;
             }
-            if (m_postingSizes[headID].load() + appendNum > (m_extraSearcher->GetPostingSizeLimit() + reassignExtraLimit) ) {
-                // double splitStartTime = sw.getElapsedMs();
+            if (m_postingSizes.GetSize(headID) + appendNum > (m_extraSearcher->GetPostingSizeLimit() + reassignExtraLimit) ) {
                 if (Split(headID, appendNum, appendPosting) == ErrorCode::FailSplit) {
                     goto checkDeleted;
                 }
-                // m_splitTotalCost += sw.getElapsedMs() - splitStartTime;
             } else {
-                // double appendSsdStartTime = sw.getElapsedMs();
                 {
                     std::shared_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]);
                     if (!m_index->ContainSample(headID)) {
@@ -1411,12 +1362,9 @@ namespace SPTAG
                         LOG(Helper::LogLevel::LL_Error, "Merge failed!\n");
                         exit(1);
                     }
-                    m_postingSizes[headID].fetch_add(appendNum, std::memory_order_relaxed);
+                    m_postingSizes.IncSize(headID, appendNum);
                 }
-                // m_appendSsdCost += sw.getElapsedMs() - appendSsdStartTime;
             }
-
-            // m_appendTotalCost += sw.getElapsedMs();
             return ErrorCode::Success;
         }
 

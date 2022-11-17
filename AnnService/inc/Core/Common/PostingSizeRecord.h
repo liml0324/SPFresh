@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-#ifndef _SPTAG_COMMON_VERSIONLABEL_H_
-#define _SPTAG_COMMON_VERSIONLABEL_H_
+#ifndef _SPTAG_COMMON_POSTINGSIZERECORD_H_
+#define _SPTAG_COMMON_POSTINGSIZERECORD_H_
 
 #include <atomic>
 #include "Dataset.h"
@@ -11,17 +11,15 @@ namespace SPTAG
 {
     namespace COMMON
     {
-        class VersionLabel
+        class PostingSizeRecord
         {
         private:
-            std::atomic<SizeType> m_inserted;
-            Dataset<std::uint8_t> m_data;
+            Dataset<int> m_data;
             
         public:
-            VersionLabel() 
+            PostingSizeRecord() 
             {
-                m_inserted = 0;
-                m_data.SetName("versionLabelID");
+                m_data.SetName("PostingSizeRecord");
             }
 
             void Initialize(SizeType size, SizeType blockSize, SizeType capacity)
@@ -29,63 +27,39 @@ namespace SPTAG
                 m_data.Initialize(size, 1, blockSize, capacity);
             }
 
-            inline size_t Count() const { return m_inserted.load(); }
-
-            inline bool Contains(const SizeType& key) const
+            inline int GetSize(const SizeType& headID)
             {
-                return *m_data[key] == 1;
+                return *m_data[headID];
             }
 
-            inline bool Delete(const SizeType& key)
+            inline bool UpdateSize(const SizeType& headID, int newSize)
             {
-                char oldvalue = InterlockedExchange8(m_data[key], 1);
-                if (oldvalue == 1) return false;
-                m_inserted++;
-                return true;
-            }
-
-            inline uint8_t GetVersion(const SizeType& key)
-            {
-                return (*m_data[key] + 1) & 0x7f;
-            }
-
-            inline bool UpdateVersion(const SizeType& key, uint8_t newVersion)
-            {
-                // *m_data[key] = ((newVersion - 1) & 0x7f) | 0x80;
                 while (true) {
-                    if (Contains(key)) return false;
-                    uint8_t oldVersion = GetVersion(key);
-                    uint8_t oldVersionMask = ((oldVersion - 1) & 0x7f) | 0x80;
-                    uint8_t newVersionMask = ((newVersion - 1) & 0x7f) | 0x80;
-                    if (InterlockedCompareExchange(m_data[key], newVersionMask, oldVersionMask) == oldVersionMask) {
+                    int oldSize = GetSize(headID);
+                    if (InterlockedCompareExchange(m_data[headID], newSize, oldSize) == oldSize) {
                         return true;
                     }
                 }
             }
 
-            inline bool IncVersion(const SizeType& key, uint8_t* newVersion)
+            inline bool IncSize(const SizeType& headID, int appendNum)
             {
                 while (true) {
-                    if (Contains(key)) return false;
-                    uint8_t oldVersion = GetVersion(key);
-                    *newVersion = oldVersion+1;
-                    uint8_t oldVersionMask = ((oldVersion - 1) & 0x7f) | 0x80;
-                    uint8_t newVersionMask = ((*newVersion - 1) & 0x7f) | 0x80;
-                    if (InterlockedCompareExchange(m_data[key], newVersionMask, oldVersionMask) == oldVersionMask) {
+                    int oldSize = GetSize(headID);
+                    int newSize = oldSize + appendNum;
+                    if (InterlockedCompareExchange(m_data[headID], newSize, oldSize) == oldSize) {
                         return true;
                     }
                 }
             }
-
-            inline SizeType GetVectorNum()
+            
+            inline SizeType GetPostingNum()
             {
                 return m_data.R();
             }
 
             inline ErrorCode Save(std::shared_ptr<Helper::DiskPriorityIO> output)
             {
-                SizeType deleted = m_inserted.load();
-                IOBINARY(output, WriteBinary, sizeof(SizeType), (char*)&deleted);
                 return m_data.Save(output);
             }
 
@@ -99,9 +73,6 @@ namespace SPTAG
 
             inline ErrorCode Load(std::shared_ptr<Helper::DiskPriorityIO> input, SizeType blockSize, SizeType capacity)
             {
-                SizeType deleted;
-                IOBINARY(input, ReadBinary, sizeof(SizeType), (char*)&deleted);
-                m_inserted = deleted;
                 return m_data.Load(input, blockSize, capacity);
             }
 
@@ -115,7 +86,6 @@ namespace SPTAG
 
             inline ErrorCode Load(char* pmemoryFile, SizeType blockSize, SizeType capacity)
             {
-                m_inserted = *((SizeType*)pmemoryFile);
                 return m_data.Load(pmemoryFile + sizeof(SizeType), blockSize, capacity);
             }
 

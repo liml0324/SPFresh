@@ -681,7 +681,6 @@ namespace SPTAG {
                 }
 
                 ShowMemoryStatus(vectorSet, sw.getElapsedSec());
-                p_index->GetSomeMemorySize();
                 p_index->GetDBStat();
 
                 int batch;

@@ -525,35 +525,13 @@ namespace SPTAG::SPANN
 
             WriteDownAllPostingToDB(postingListSize_int, selections, m_versionMap, fullVectors);
 
+            COMMON::PostingSizeRecord m_postingSizes;
+            m_postingSizes.Initialize(postingListSize.size(), p_headIndex->m_iDataBlockSize, p_headIndex->m_iDataCapacity);
+            for (int i = 0; i < postingListSize.size(); i++) {
+                m_postingSizes.UpdateSize(i, postingListSize[i]);
+            }
             LOG(Helper::LogLevel::LL_Info, "SPFresh: Writing SSD Info\n");
-
-            auto ptr = SPTAG::f_createIO();
-            if (ptr == nullptr || !ptr->Initialize(p_opt.m_ssdInfoFile.c_str(), std::ios::binary | std::ios::out)) {
-                LOG(Helper::LogLevel::LL_Error, "Failed open file %s\n", p_opt.m_ssdInfoFile.c_str());
-                exit(1);
-            }
-            //Number of all documents.
-            int i32Val = static_cast<int>(fullCount);
-            if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndexInfo File!");
-                exit(1);
-            }
-            //Number of postings
-            i32Val = static_cast<int>(postingListSize.size());
-
-            if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndexInfo File!");
-                exit(1);
-            }
-
-            for(int id = 0; id < postingListSize.size(); id++)
-            {
-                i32Val = postingListSize[id].load();
-                if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndexInfo File!");
-                    exit(1);
-                }
-            }
+            m_postingSizes.Save(p_opt.m_ssdInfoFile);
             LOG(Helper::LogLevel::LL_Info, "SPFresh: save versionMap\n");
             m_versionMap.Save(p_opt.m_fullDeletedIDFile);
 

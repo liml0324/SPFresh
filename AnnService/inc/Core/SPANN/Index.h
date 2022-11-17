@@ -15,6 +15,7 @@
 #include "../Common/FineGrainedLock.h"
 
 #include "../Common/VersionLabel.h"
+#include "../Common/PostingSizeRecord.h"
 #include "inc/Helper/SimpleIniReader.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/ThreadPool.h"
@@ -215,7 +216,8 @@ namespace SPTAG
             //std::unique_ptr<std::shared_timed_mutex[]> m_rwLocks;
             COMMON::FineGrainedRWLock m_rwLocks;
 
-            std::unique_ptr<std::atomic_uint32_t[]> m_postingSizes;
+            // std::unique_ptr<std::atomic_uint32_t[]> m_postingSizes;
+            COMMON::PostingSizeRecord m_postingSizes;
             std::atomic_uint64_t m_vectorNum{0};
 
             std::shared_ptr<IExtraSearcher> m_extraSearcher;
@@ -388,11 +390,6 @@ namespace SPTAG
             int getGarbageNum() {return m_garbageNum;}
 
             unsigned long getReAssignScanNum() {return m_reAssignScanNum.load();}
-
-            void GetSomeMemorySize() {
-                double atomicIntSize = sizeof(std::atomic_uint32_t) * m_options.m_maxHeadNode / 1024;
-                LOG(Helper::LogLevel::LL_Info,"Atomic Posting Size Counter: %.6lf KB\n", atomicIntSize);
-            }
 
             void UpdateStop()
             {
@@ -582,7 +579,7 @@ namespace SPTAG
                 }
                 for(int id = 0; id < postingListSize.size(); id++)
                 {
-                    m_postingSizes[id].store(postingListSize[id]);
+                    m_postingSizes.UpdateSize(id, postingListSize[id]);
                 }
             }
 
@@ -832,8 +829,8 @@ namespace SPTAG
                 int deletedHead = 0;
                 for (int i = 0; i < m_index->GetNumSamples(); i++) {
                     if (!m_index->ContainSample(i)) deletedHead++;
-                    lengthDistribution[m_postingSizes[i]/10]++;
-                    int size = m_postingSizes[i] * vectorInfoSize;
+                    lengthDistribution[m_postingSizes.GetSize(i)/10]++;
+                    int size = m_postingSizes.GetSize(i) * vectorInfoSize;
                     if (size < PageSize) {
                         if (size < 512) sizeDistribution[0]++;
                         else if (size < 1024) sizeDistribution[1]++;
@@ -880,7 +877,7 @@ namespace SPTAG
                             {
                                 if (m_index->ContainSample(index)) 
                                 {
-                                    if (m_postingSizes[index].load() >= limit) 
+                                    if (m_postingSizes.GetSize(index) >= limit) 
                                     {
                                         doneReassign = false;
                                         std::string postingList;
