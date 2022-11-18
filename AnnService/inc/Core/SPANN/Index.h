@@ -909,8 +909,15 @@ namespace SPTAG
                                             else {
                                                 int begin, end = 0;
                                                 m_index->AddIndexId(args.centers + k * args._D, 1, m_options.m_dim, begin, end);
-                                                if (begin == m_options.m_maxHeadNode) exit(0);
                                                 m_index->AddIndexIdx(begin, end);
+                                                {
+                                                    std::lock_guard<std::mutex> lock(m_dataAddLock);
+                                                    auto ret = m_postingSizes.AddBatch(1);
+                                                    if (ret == ErrorCode::MemoryOverFlow) {
+                                                        LOG(Helper::LogLevel::LL_Info, "MemoryOverFlow: newHeadVID: %d, Map Size:%d\n", begin, m_postingSizes.BufferSize());
+                                                        exit(1);
+                                                    }
+                                                }
                                             }
                                         }
                                         if (!theSameHead) {
