@@ -92,6 +92,7 @@ namespace SPTAG::SPANN
                 // table_options.optimize_filters_for_memory = true;
 
                 dbOptions.table_factory.reset(rocksdb::NewBlockBasedTableFactory(table_options));
+                dbOptions.statistics = rocksdb::CreateDBStatistics();
             }
             
             if (usdDirectIO) {
@@ -254,6 +255,14 @@ namespace SPTAG::SPANN
             LOG(Helper::LogLevel::LL_Info, "RocksDB Status:\n%s", stats.c_str());
             */
         }
+
+        void GetDBStat() {
+            if (dbOptions.statistics != nullptr)
+                LOG(Helper::LogLevel::LL_Info, "RocksDB statistics:\n %s\n", dbOptions.statistics->ToString().c_str());
+            else 
+                LOG(Helper::LogLevel::LL_Info, "DB statistics not set!\n");
+        }
+
     private:
         std::string dbPath;
         rocksdb::DB* db{};
@@ -378,27 +387,6 @@ namespace SPTAG::SPANN
             int numThreads = p_opt.m_iSSDNumberOfThreads;
             int candidateNum = p_opt.m_internalResultNum;
 
-            std::unordered_set<SizeType> headVectorIDS;
-            if (p_opt.m_headIDFile.empty()) {
-                LOG(Helper::LogLevel::LL_Error, "Not found VectorIDTranslate!\n");
-                return false;
-            }
-
-            {
-                auto ptr = SPTAG::f_createIO();
-                if (ptr == nullptr || !ptr->Initialize((p_opt.m_indexDirectory + FolderSep +  p_opt.m_headIDFile).c_str(), std::ios::binary | std::ios::in)) {
-                    LOG(Helper::LogLevel::LL_Error, "failed open VectorIDTranslate: %s\n", p_opt.m_headIDFile.c_str());
-                    return false;
-                }
-
-                std::uint64_t vid;
-                while (ptr->ReadBinary(sizeof(vid), reinterpret_cast<char*>(&vid)) == sizeof(vid))
-                {
-                    headVectorIDS.insert(static_cast<SizeType>(vid));
-                }
-                LOG(Helper::LogLevel::LL_Info, "Loaded %u Vector IDs\n", static_cast<uint32_t>(headVectorIDS.size()));
-            }
-
             SizeType fullCount = 0;
             size_t vectorInfoSize = 0;
             {
@@ -414,7 +402,7 @@ namespace SPTAG::SPANN
             Selection selections(static_cast<size_t>(fullCount) * p_opt.m_replicaCount, p_opt.m_tmpdir);
             LOG(Helper::LogLevel::LL_Info, "Full vector count:%d Edge bytes:%llu selection size:%zu, capacity size:%zu\n", fullCount, sizeof(Edge), selections.m_selections.size(), selections.m_selections.capacity());
             std::vector<std::atomic_int> replicaCount(fullCount);
-            std::vector<std::atomic_int> postingListSize(headVectorIDS.size());
+            std::vector<std::atomic_int> postingListSize(p_headIndex->GetNumSamples());
             for (auto& pls : postingListSize) pls = 0;
             std::unordered_set<SizeType> emptySet;
             SizeType batchSize = (fullCount + p_opt.m_batches - 1) / p_opt.m_batches;
@@ -432,22 +420,6 @@ namespace SPTAG::SPANN
                     if (p_opt.m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized()) fullVectors->Normalize(p_opt.m_iSSDNumberOfThreads);
 
                     emptySet.clear();
-
-                    int sampleNum = 0;
-                    for (int j = start; j < end && sampleNum < sampleSize; j++)
-                    {
-                        if (headVectorIDS.count(j) == 0) samples[sampleNum++] = j - start;
-                    }
-
-                    float acc = 0;
-// #pragma omp parallel for schedule(dynamic)
-//                     for (int j = 0; j < sampleNum; j++)
-//                     {
-//                         COMMON::Utils::atomic_float_add(&acc, COMMON::TruthSet::CalculateRecall(p_headIndex.get(), fullVectors->GetVector(samples[j]), candidateNum));
-
-//                     }
-//                     acc = acc / sampleNum;
-                    LOG(Helper::LogLevel::LL_Info, "Batch %d vector(%d,%d) loaded with %d vectors (%zu) HeadIndex acc @%d:%f.\n", i, start, end, fullVectors->Count(), selections.m_selections.size(), candidateNum, acc);
 
                     p_headIndex->ApproximateRNG(fullVectors, emptySet, candidateNum, selections.m_selections.data(), p_opt.m_replicaCount, numThreads, p_opt.m_gpuSSDNumTrees, p_opt.m_gpuSSDLeafSize, p_opt.m_rngFactor, p_opt.m_numGPUs);
 
@@ -569,31 +541,14 @@ namespace SPTAG::SPANN
             LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize versionMap\n");
             COMMON::VersionLabel m_versionMap;
             m_versionMap.Initialize(fullCount, p_headIndex->m_iDataBlockSize, p_headIndex->m_iDataCapacity);
-            LOG(Helper::LogLevel::LL_Info, "SPFresh: save versionMap\n");
 
-            for (int id = 0; id < postingListSize.size(); id++)
-            {
-                std::string postinglist;
-                std::size_t selectIdx = selections.lower_bound(id);
-                for (int j = 0; j < postingListSize[id]; ++j) {
-                    if (selections[selectIdx].node != id) {
-                        LOG(Helper::LogLevel::LL_Error, "Selection ID NOT MATCH\n");
-                        exit(1);
-                    }
-                    // float distance = selections[selectIdx].distance;
-                    int fullID = selections[selectIdx++].tonode;
-                    uint8_t version = 0;
-                    m_versionMap.UpdateVersion(fullID, 0);
-                    size_t dim = fullVectors->Dimension();
-                    // First Vector ID, then Vector
-                    postinglist += Helper::Convert::Serialize<int>(&fullID, 1);
-                    postinglist += Helper::Convert::Serialize<uint8_t>(&version, 1);
-                    // postinglist += Helper::Convert::Serialize<float>(&distance, 1);
-                    postinglist += Helper::Convert::Serialize<ValueType>(fullVectors->GetVector(fullID), dim);
-                }
+            LOG(Helper::LogLevel::LL_Info, "SPFresh: Writing values to DB\n");
 
-                AddIndex(id, postinglist);
-            }
+            std::vector<int> postingListSize_int(postingListSize.begin(), postingListSize.end());
+
+            WriteDownAllPostingToDB(postingListSize_int, selections, m_versionMap, fullVectors);
+
+            LOG(Helper::LogLevel::LL_Info, "SPFresh: Writing SSD Info\n");
 
             auto ptr = SPTAG::f_createIO();
             if (ptr == nullptr || !ptr->Initialize(p_opt.m_ssdInfoFile.c_str(), std::ios::binary | std::ios::out)) {
@@ -622,7 +577,7 @@ namespace SPTAG::SPANN
                     exit(1);
                 }
             }
-
+            LOG(Helper::LogLevel::LL_Info, "SPFresh: save versionMap\n");
             m_versionMap.Save(p_opt.m_fullDeletedIDFile);
 
             auto t5 = std::chrono::high_resolution_clock::now();
@@ -630,6 +585,29 @@ namespace SPTAG::SPANN
             LOG(Helper::LogLevel::LL_Info, "Total used time: %.2lf minutes (about %.2lf hours).\n", elapsedSeconds / 60.0, elapsedSeconds / 3600.0);
 
             return true;
+        }
+
+        void WriteDownAllPostingToDB(const std::vector<int>& p_postingListSizes, Selection& p_postingSelections, COMMON::VersionLabel& m_versionMap, std::shared_ptr<VectorSet> p_fullVectors) {
+            size_t dim = p_fullVectors->Dimension();
+            for (int id = 0; id < p_postingListSizes.size(); id++)
+            {
+                std::string postinglist;
+                std::size_t selectIdx = p_postingSelections.lower_bound(id);
+                for (int j = 0; j < p_postingListSizes[id]; ++j) {
+                    if (p_postingSelections[selectIdx].node != id) {
+                        LOG(Helper::LogLevel::LL_Error, "Selection ID NOT MATCH\n");
+                        exit(1);
+                    }
+                    int fullID = p_postingSelections[selectIdx++].tonode;
+                    uint8_t version = 0;
+                    m_versionMap.UpdateVersion(fullID, 0);
+                    // First Vector ID, then version, then Vector
+                    postinglist += Helper::Convert::Serialize<int>(&fullID, 1);
+                    postinglist += Helper::Convert::Serialize<uint8_t>(&version, 1);
+                    postinglist += Helper::Convert::Serialize<ValueType>(p_fullVectors->GetVector(fullID), dim);
+                }
+                AddIndex(id, postinglist);
+            }
         }
 
         ErrorCode AppendPosting(SizeType headID, const std::string& appendPosting) override {
@@ -640,6 +618,7 @@ namespace SPTAG::SPANN
         }
 
         void ForceCompaction() override { db.ForceCompaction(); }
+        void GetDBStats() override { db.GetDBStat(); }
 
         inline ErrorCode SearchIndex(SizeType headID, std::string& posting) override {  return db.Get(headID, &posting); }
         inline ErrorCode AddIndex(SizeType headID, const std::string& posting) override { m_postingNum++; return db.Put(headID, posting); }
@@ -772,17 +751,8 @@ namespace SPTAG::SPANN
 
     private:
 
-        std::string m_extraFullGraphFile;
-
-//        std::vector<std::vector<ListInfo>> m_listInfos;
-
-        std::vector<std::shared_ptr<Helper::DiskPriorityIO>> m_indexFiles;
 
         int m_vectorInfoSize = 0;
-
-//        int m_totalListCount = 0;
-
-//        int m_listPerFile = 0;
 
         int m_postingSizeLimit = INT_MAX;
 

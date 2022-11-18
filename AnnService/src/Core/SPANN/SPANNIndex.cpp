@@ -657,27 +657,62 @@ namespace SPTAG
 					}
 
 					input.close();
+                    CalculatePostingDistribution();
+                    if (m_options.m_preReassign && m_options.m_buildSsdIndex) {
+                        PreReassign(p_reader);
+                        m_index->SaveIndex(m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder);
+                        LOG(Helper::LogLevel::LL_Info, "SPFresh: ReWriting SSD Info\n");
+                        auto ptr = SPTAG::f_createIO();
+                        if (ptr == nullptr || !ptr->Initialize(m_options.m_ssdInfoFile.c_str(), std::ios::binary | std::ios::out)) {
+                            LOG(Helper::LogLevel::LL_Error, "Failed open file %s\n", m_options.m_ssdInfoFile.c_str());
+                            exit(1);
+                        }
+                        //Number of all documents.
+                        int i32Val = static_cast<int>(vectorNum);
+                        if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
+                            LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndexInfo File!");
+                            exit(1);
+                        }
+                        //Number of postings
+                        i32Val = static_cast<int>(m_index->GetNumSamples());
+
+                        if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
+                            LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndexInfo File!");
+                            exit(1);
+                        }
+
+                        for(int id = 0; id < m_index->GetNumSamples(); id++)
+                        {
+                            i32Val = m_postingSizes[id].load();
+                            if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
+                                LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndexInfo File!");
+                                exit(1);
+                            }
+                        }
+                    }
                     //ForceCompaction();
                 }
             }
             
-            LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize persistent buffer\n");
-            std::shared_ptr<Helper::KeyValueIO> db;
-            db.reset(new SPANN::RocksDBIO());
-            m_persistentBuffer = std::make_shared<PersistentBuffer>(m_options.m_persistentBufferPath, db);
-            LOG(Helper::LogLevel::LL_Info, "SPFresh: finish initialization\n");
-            LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize thread pools, append: %d, reassign %d\n", m_options.m_appendThreadNum, m_options.m_reassignThreadNum);
-            m_appendThreadPool = std::make_shared<ThreadPool>();
-            m_appendThreadPool->init(m_options.m_appendThreadNum);
-            m_reassignThreadPool = std::make_shared<ThreadPool>();
-            m_reassignThreadPool->init(m_options.m_reassignThreadNum);
-            LOG(Helper::LogLevel::LL_Info, "SPFresh: finish initialization\n");
+            if (m_options.m_update) {
+                LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize persistent buffer\n");
+                std::shared_ptr<Helper::KeyValueIO> db;
+                db.reset(new SPANN::RocksDBIO());
+                m_persistentBuffer = std::make_shared<PersistentBuffer>(m_options.m_persistentBufferPath, db);
+                LOG(Helper::LogLevel::LL_Info, "SPFresh: finish initialization\n");
+                LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize thread pools, append: %d, reassign %d\n", m_options.m_appendThreadNum, m_options.m_reassignThreadNum);
+                m_appendThreadPool = std::make_shared<ThreadPool>();
+                m_appendThreadPool->init(m_options.m_appendThreadNum);
+                m_reassignThreadPool = std::make_shared<ThreadPool>();
+                m_reassignThreadPool->init(m_options.m_reassignThreadNum);
+                LOG(Helper::LogLevel::LL_Info, "SPFresh: finish initialization\n");
 
-            LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize dispatcher\n");
-            m_dispatcher = std::make_shared<Dispatcher>(m_persistentBuffer, m_options.m_batch, m_appendThreadPool, m_reassignThreadPool, this);
+                LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize dispatcher\n");
+                m_dispatcher = std::make_shared<Dispatcher>(m_persistentBuffer, m_options.m_batch, m_appendThreadPool, m_reassignThreadPool, this);
 
-            m_dispatcher->run();
-            LOG(Helper::LogLevel::LL_Info, "SPFresh: finish initialization\n");
+                m_dispatcher->run();
+                LOG(Helper::LogLevel::LL_Info, "SPFresh: finish initialization\n");
+            }
             
             auto t4 = std::chrono::high_resolution_clock::now();
             double buildSSDTime = std::chrono::duration_cast<std::chrono::seconds>(t4 - t3).count();

@@ -92,6 +92,8 @@ DefineSSDParameter(m_useKV, bool, false, "UseKV")
 DefineSSDParameter(m_KVPath, std::string, std::string(""), "KVPath")
 DefineSSDParameter(m_ssdInfoFile, std::string, std::string(""), "SsdInfoFile")
 DefineSSDParameter(m_useDirectIO, bool, false, "UseDirectIO")
+DefineSSDParameter(m_preReassign, bool, false, "PreReassign")
+DefineSSDParameter(m_preReassignRatio, float, 0.7f, "PreReassignRatio")
 
 // GPU Building
 DefineSSDParameter(m_gpuSSDNumTrees, int, 100, "GPUSSDNumTrees")
@@ -122,8 +124,7 @@ DefineSSDParameter(m_iotimeout, int, 30, "IOTimeout")
 DefineSSDParameter(m_truthFilePrefix, std::string, std::string(""), "TruthFilePrefix")
 // CalTruth
 DefineSSDParameter(m_calTruth, bool, true, "CalTruth")
-// CalTruth for Recall@1/10/20/50/100
-DefineSSDParameter(m_calAllTruth, bool, false, "CalAllTruth")
+DefineSSDParameter(m_onlySearchFinalBatch, bool, false, "OnlySearchFinalBatch")
 // Search multiple times for stable result
 DefineSSDParameter(m_searchTimes, int, 1, "SearchTimes")
 // Frontend search threadnum

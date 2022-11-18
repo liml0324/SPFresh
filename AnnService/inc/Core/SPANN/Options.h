@@ -94,6 +94,8 @@ namespace SPTAG {
             std::string m_KVPath;
             std::string m_ssdInfoFile;
             bool m_useDirectIO;
+            bool m_preReassign;
+            float m_preReassignRatio;
 
             // GPU building
             int m_gpuSSDNumTrees;
@@ -129,6 +131,7 @@ namespace SPTAG {
             int m_minInternalResultNum;
             int m_stepInternalResultNum;
             int m_maxInternalResultNum;
+            bool m_onlySearchFinalBatch;
 
             // Updating
             int m_postingVectorLimit;

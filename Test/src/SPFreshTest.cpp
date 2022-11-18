@@ -662,22 +662,27 @@ namespace SPTAG {
                     insertCount = p_opts.m_endVectorNum - curCount;
                 }
 
-                // p_index->ForceCompaction();
+                p_index->ForceCompaction();
 
-                if (p_opts.m_maxInternalResultNum != -1) 
-                {
-                    for (int iterInternalResultNum = p_opts.m_minInternalResultNum; iterInternalResultNum <= p_opts.m_maxInternalResultNum; iterInternalResultNum += p_opts.m_stepInternalResultNum) 
+                p_index->GetDBStat();
+
+                if (!p_opts.m_onlySearchFinalBatch) {
+                    if (p_opts.m_maxInternalResultNum != -1) 
                     {
-                        StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, iterInternalResultNum, curCount, p_opts, sw.getElapsedSec());
+                        for (int iterInternalResultNum = p_opts.m_minInternalResultNum; iterInternalResultNum <= p_opts.m_maxInternalResultNum; iterInternalResultNum += p_opts.m_stepInternalResultNum) 
+                        {
+                            StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, iterInternalResultNum, curCount, p_opts, sw.getElapsedSec());
+                        }
                     }
-                }
-                else 
-                {
-                    StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, curCount, p_opts, sw.getElapsedSec());
+                    else 
+                    {
+                        StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, curCount, p_opts, sw.getElapsedSec());
+                    }
                 }
 
                 ShowMemoryStatus(vectorSet, sw.getElapsedSec());
                 p_index->GetSomeMemorySize();
+                p_index->GetDBStat();
 
                 int batch;
                 if (step == 0) {
@@ -709,6 +714,7 @@ namespace SPTAG {
                         if (insert_status == std::future_status::timeout) {
                             ShowMemoryStatus(vectorSet, sw.getElapsedSec());
                             if(p_opts.m_searchDuringUpdate) StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, curCount, p_opts, sw.getElapsedSec());
+                            p_index->GetDBStat();
                         }
                     }while (insert_status != std::future_status::ready);
 
@@ -716,7 +722,14 @@ namespace SPTAG {
                     finishedInsert += step;
                     LOG(Helper::LogLevel::LL_Info, "Total Vector num %d \n", curCount);
 
+                    LOG(Helper::LogLevel::LL_Info, "After %d insertion, head vectors split %d times, head missing %d times, same head %d times, reassign %d(%.2lf) times, reassign scan %ld times, garbage collection %d times\n", finishedInsert, p_index->getSplitTimes(), p_index->getHeadMiss(), p_index->getSameHead(), p_index->getReassignNum(), p_index->getReassignNum(), p_index->getReAssignScanNum(), p_index->getGarbageNum());
+
+                    ShowMemoryStatus(vectorSet, sw.getElapsedSec());
+                    p_index->CalculatePostingDistribution();
+                    // p_index->ForceCompaction();
+
                     p_opts.m_calTruth = calTruthOrigin;
+                    if (p_opts.m_onlySearchFinalBatch && batch - 1 != i) continue;
                     if (p_opts.m_maxInternalResultNum != -1) 
                     {
                         for (int iterInternalResultNum = p_opts.m_minInternalResultNum; iterInternalResultNum <= p_opts.m_maxInternalResultNum; iterInternalResultNum += p_opts.m_stepInternalResultNum) 
@@ -728,10 +741,6 @@ namespace SPTAG {
                     {
                         StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, curCount, p_opts, sw.getElapsedSec());
                     }
-
-                    LOG(Helper::LogLevel::LL_Info, "After %d insertion, head vectors split %d times, head missing %d times, same head %d times, reassign %d(%.2lf) times, reassign scan %ld times, garbage collection %d times\n", finishedInsert, p_index->getSplitTimes(), p_index->getHeadMiss(), p_index->getSameHead(), p_index->getReassignNum(), p_index->getReassignNum(), p_index->getReAssignScanNum(), p_index->getGarbageNum());
-
-                    ShowMemoryStatus(vectorSet, sw.getElapsedSec());
                 }
             }
 
