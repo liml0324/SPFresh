@@ -13,6 +13,7 @@
 
 #include "rocksdb/db.h"
 #include "rocksdb/filter_policy.h"
+#include "rocksdb/rate_limiter.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/options.h"
 #include "rocksdb/merge_operator.h"
@@ -57,11 +58,33 @@ namespace SPTAG::SPANN
                 // SST file size options
                 // dbOptions.target_file_size_base = 1024UL * 1024 * 1024;
                 // dbOptions.target_file_size_multiplier = 2;
+                // dbOptions.max_bytes_for_level_base = 16 * 1024UL * 1024 * 1024;
+                // dbOptions.max_bytes_for_level_multiplier = 4;
+                // dbOptions.max_subcompactions = 16;
+                // dbOptions.num_levels = 4;
+                // dbOptions.level0_file_num_compaction_trigger = 1;
+                // dbOptions.level_compaction_dynamic_level_bytes = false;
+                // dbOptions.write_buffer_size = 1024UL * 1024 * 1024;
+
+                // rate limiter options
+                // dbOptions.rate_limiter.reset(rocksdb::NewGenericRateLimiter(100UL << 20));
+
+                // blob options
+                // dbOptions.enable_blob_files = true;
+                // dbOptions.min_blob_size = 256;
+                // dbOptions.blob_file_size = 8UL << 30;
+                // dbOptions.blob_compression_type = rocksdb::CompressionType::kNoCompression;
+                // dbOptions.enable_blob_garbage_collection = true;
+                // dbOptions.blob_cache = rocksdb::NewLRUCache(8UL << 30);
+                // dbOptions.prepopulate_blob_cache = rocksdb::PrepopulateBlobCache::kFlushOnly;
 
                 // compression options
                 // dbOptions.compression = rocksdb::CompressionType::kLZ4Compression;
                 // dbOptions.bottommost_compression = rocksdb::CompressionType::kZSTD;
+
+                // block cache options
                 rocksdb::BlockBasedTableOptions table_options;
+                // table_options.block_cache = rocksdb::NewLRUCache(8UL << 30);
                 table_options.no_block_cache = true;
 
                 // filter options
