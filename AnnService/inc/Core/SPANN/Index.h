@@ -407,6 +407,7 @@ namespace SPTAG
                     curCount = upperBound;
                 }
                 LOG(Helper::LogLevel::LL_Info, "Rebuild SSD Index.\n");
+                auto rebuildTimeBegin = std::chrono::high_resolution_clock::now();
                 std::vector<EdgeInsert> selections(static_cast<size_t>(curCount)* m_options.m_replicaCount);
 
                 std::vector<int> replicaCount(curCount, 0);
@@ -552,11 +553,10 @@ namespace SPTAG
                         LOG(Helper::LogLevel::LL_Info, "Replica Count Dist: %d, %d\n", i, replicaCountDist[i]);
                     }
                 }
-                std::string postinglist;
+                #pragma omp parallel for num_threads(10)
                 for (int id = 0; id < postingListSize.size(); id++) 
                 {
-                    postinglist.resize(0);
-                    postinglist.clear();
+                    std::string postinglist;
                     std::size_t selectIdx = std::lower_bound(selections.begin(), selections.end(), id, g_edgeComparerInsert)
                                             - selections.begin();
                     for (int j = 0; j < postingListSize[id]; ++j) {
@@ -576,11 +576,11 @@ namespace SPTAG
                         postinglist += Helper::Convert::Serialize<T>(fullVectors->GetVector(fullID), dim);
                     }
                     m_extraSearcher->OverrideIndex(id, postinglist);
-                }
-                for(int id = 0; id < postingListSize.size(); id++)
-                {
                     m_postingSizes.UpdateSize(id, postingListSize[id]);
                 }
+                auto rebuildTimeEnd = std::chrono::high_resolution_clock::now();
+                double elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(rebuildTimeEnd - rebuildTimeBegin).count();
+                LOG(Helper::LogLevel::LL_Info, "rebuild cost: %.2lf s\n", elapsedSeconds);
             }
 
             void QuantifyAssumptionBrokenTotally()
@@ -861,6 +861,7 @@ namespace SPTAG
             {
                 std::atomic_bool doneReassign = false;
                 while (!doneReassign) {
+                    auto preReassignTimeBegin = std::chrono::high_resolution_clock::now();
                     doneReassign = true;
                     std::vector<std::thread> threads;
                     std::atomic_int nextPostingID(0);
@@ -875,54 +876,55 @@ namespace SPTAG
                             index = nextPostingID.fetch_add(1);
                             if (index < currentPostingNum) 
                             {
-                                if (m_index->ContainSample(index)) 
+                                if ((index & ((1 << 14) - 1)) == 0)
                                 {
-                                    if (m_postingSizes.GetSize(index) >= limit) 
+                                    LOG(Helper::LogLevel::LL_Info, "Sent %.2lf%%...\n", index * 100.0 / currentPostingNum);
+                                }
+                                if (m_postingSizes.GetSize(index) >= limit) 
+                                {
+                                    doneReassign = false;
+                                    std::string postingList;
+                                    m_extraSearcher->SearchIndex(index, postingList);
+                                    auto* postingP = reinterpret_cast<uint8_t*>(&postingList.front());
+                                    size_t vectorInfoSize = m_options.m_dim * sizeof(T) + m_metaDataSize;
+                                    size_t postVectorNum = postingList.size() / vectorInfoSize;
+                                    COMMON::Dataset<T> smallSample;  // smallSample[i] -> VID
+                                    std::shared_ptr<uint8_t> vectorBuffer(new uint8_t[m_options.m_dim * sizeof(T) * postVectorNum], std::default_delete<uint8_t[]>());
+                                    std::vector<int> localIndices(postVectorNum);
+                                    auto vectorBuf = vectorBuffer.get();
+                                    for (int j = 0; j < postVectorNum; j++)
                                     {
-                                        doneReassign = false;
-                                        std::string postingList;
-                                        m_extraSearcher->SearchIndex(index, postingList);
-                                        auto* postingP = reinterpret_cast<uint8_t*>(&postingList.front());
-                                        size_t vectorInfoSize = m_options.m_dim * sizeof(T) + m_metaDataSize;
-                                        size_t postVectorNum = postingList.size() / vectorInfoSize;
-                                        COMMON::Dataset<T> smallSample;  // smallSample[i] -> VID
-                                        std::shared_ptr<uint8_t> vectorBuffer(new uint8_t[m_options.m_dim * sizeof(T) * postVectorNum], std::default_delete<uint8_t[]>());
-                                        std::vector<int> localIndices(postVectorNum);
-                                        auto vectorBuf = vectorBuffer.get();
-                                        for (int j = 0; j < postVectorNum; j++)
-                                        {
-                                            uint8_t* vectorId = postingP + j * vectorInfoSize;
-                                            localIndices[j] = j;
-                                            memcpy(vectorBuf, vectorId + m_metaDataSize, m_options.m_dim * sizeof(T));
-                                            vectorBuf += m_options.m_dim * sizeof(T);
+                                        uint8_t* vectorId = postingP + j * vectorInfoSize;
+                                        localIndices[j] = j;
+                                        memcpy(vectorBuf, vectorId + m_metaDataSize, m_options.m_dim * sizeof(T));
+                                        vectorBuf += m_options.m_dim * sizeof(T);
+                                    }
+                                    smallSample.Initialize(postVectorNum, m_options.m_dim, m_index->m_iDataBlockSize, m_index->m_iDataCapacity, reinterpret_cast<T*>(vectorBuffer.get()), false);
+                                    SPTAG::COMMON::KmeansArgs<T> args(2, smallSample.C(), (SizeType)localIndices.size(), 1, m_index->GetDistCalcMethod());
+                                    std::shuffle(localIndices.begin(), localIndices.end(), std::mt19937(std::random_device()()));
+                                    int numClusters = SPTAG::COMMON::KmeansClustering(smallSample, localIndices, 0, (SizeType)localIndices.size(), args, 1000, 100.0F, false, nullptr, m_options.m_virtualHead);
+                                    bool theSameHead = false;
+                                    for (int k = 0; k < 2; k++) {
+                                        if (args.counts[k] == 0)	continue;
+                                        if (!theSameHead && m_index->ComputeDistance(args.centers + k * args._D, m_index->GetSample(index)) < Epsilon) {
+                                            theSameHead = true;
                                         }
-                                        smallSample.Initialize(postVectorNum, m_options.m_dim, m_index->m_iDataBlockSize, m_index->m_iDataCapacity, reinterpret_cast<T*>(vectorBuffer.get()), false);
-                                        SPTAG::COMMON::KmeansArgs<T> args(2, smallSample.C(), (SizeType)localIndices.size(), 1, m_index->GetDistCalcMethod());
-                                        std::shuffle(localIndices.begin(), localIndices.end(), std::mt19937(std::random_device()()));
-                                        int numClusters = SPTAG::COMMON::KmeansClustering(smallSample, localIndices, 0, (SizeType)localIndices.size(), args, 1000, 100.0F, false, nullptr, m_options.m_virtualHead);
-                                        bool theSameHead = false;
-                                        for (int k = 0; k < 2; k++) {
-                                            if (args.counts[k] == 0)	continue;
-                                            if (!theSameHead && m_index->ComputeDistance(args.centers + k * args._D, m_index->GetSample(index)) < Epsilon) {
-                                                theSameHead = true;
-                                            }
-                                            else {
-                                                int begin, end = 0;
-                                                m_index->AddIndexId(args.centers + k * args._D, 1, m_options.m_dim, begin, end);
-                                                m_index->AddIndexIdx(begin, end);
-                                                {
-                                                    std::lock_guard<std::mutex> lock(m_dataAddLock);
-                                                    auto ret = m_postingSizes.AddBatch(1);
-                                                    if (ret == ErrorCode::MemoryOverFlow) {
-                                                        LOG(Helper::LogLevel::LL_Info, "MemoryOverFlow: newHeadVID: %d, Map Size:%d\n", begin, m_postingSizes.BufferSize());
-                                                        exit(1);
-                                                    }
+                                        else {
+                                            int begin, end = 0;
+                                            m_index->AddIndexId(args.centers + k * args._D, 1, m_options.m_dim, begin, end);
+                                            m_index->AddIndexIdx(begin, end);
+                                            {
+                                                std::lock_guard<std::mutex> lock(m_dataAddLock);
+                                                auto ret = m_postingSizes.AddBatch(1);
+                                                if (ret == ErrorCode::MemoryOverFlow) {
+                                                    LOG(Helper::LogLevel::LL_Info, "MemoryOverFlow: newHeadVID: %d, Map Size:%d\n", begin, m_postingSizes.BufferSize());
+                                                    exit(1);
                                                 }
                                             }
                                         }
-                                        if (!theSameHead) {
-                                            m_index->DeleteIndex(index);
-                                        }
+                                    }
+                                    if (!theSameHead) {
+                                        m_index->DeleteIndex(index);
                                     }
                                 }
                             }
@@ -934,6 +936,9 @@ namespace SPTAG
                     };
                     for (int j = 0; j < m_options.m_iSSDNumberOfThreads; j++) { threads.emplace_back(func); }
                     for (auto& thread : threads) { thread.join(); }
+                    auto preReassignTimeEnd = std::chrono::high_resolution_clock::now();
+                    double elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(preReassignTimeEnd - preReassignTimeBegin).count();
+                    LOG(Helper::LogLevel::LL_Info, "rebuild cost: %.2lf s\n", elapsedSeconds);
                     Rebuild(p_reader);
                     ForceCompaction();
                     CalculatePostingDistribution();

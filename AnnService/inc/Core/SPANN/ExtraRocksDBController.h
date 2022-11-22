@@ -56,15 +56,15 @@ namespace SPTAG::SPANN
                 dbOptions.merge_operator.reset(new AnnMergeOperator);
 
                 // SST file size options
-                // dbOptions.target_file_size_base = 1024UL * 1024 * 1024;
-                // dbOptions.target_file_size_multiplier = 2;
+                dbOptions.target_file_size_base = 1024UL * 1024 * 1024;
+                dbOptions.target_file_size_multiplier = 2;
                 // dbOptions.max_bytes_for_level_base = 16 * 1024UL * 1024 * 1024;
                 // dbOptions.max_bytes_for_level_multiplier = 4;
                 // dbOptions.max_subcompactions = 16;
                 // dbOptions.num_levels = 4;
                 // dbOptions.level0_file_num_compaction_trigger = 1;
                 // dbOptions.level_compaction_dynamic_level_bytes = false;
-                // dbOptions.write_buffer_size = 1024UL * 1024 * 1024;
+                dbOptions.write_buffer_size = 1024UL * 1024 * 1024;
 
                 // rate limiter options
                 // dbOptions.rate_limiter.reset(rocksdb::NewGenericRateLimiter(100UL << 20));
@@ -567,6 +567,7 @@ namespace SPTAG::SPANN
 
         void WriteDownAllPostingToDB(const std::vector<int>& p_postingListSizes, Selection& p_postingSelections, COMMON::VersionLabel& m_versionMap, std::shared_ptr<VectorSet> p_fullVectors) {
             size_t dim = p_fullVectors->Dimension();
+            #pragma omp parallel for num_threads(10)
             for (int id = 0; id < p_postingListSizes.size(); id++)
             {
                 std::string postinglist;
