@@ -461,8 +461,9 @@ namespace SPTAG
             template <typename T>
             void Rebuild(const Dataset<T>& data, DistCalcMethod distMethod, IAbortOperation* abort)
             {
+                LOG(Helper::LogLevel::LL_Info, "Rebuild has been modified thread number by SPFresh");
                 BKTree newTrees(*this);
-                newTrees.BuildTrees<T>(data, distMethod, 1, nullptr, nullptr, false, abort);
+                newTrees.BuildTrees<T>(data, distMethod, 160, nullptr, nullptr, false, abort);
 
                 std::unique_lock<std::shared_timed_mutex> lock(*m_lock);
                 m_pTreeRoots.swap(newTrees.m_pTreeRoots);

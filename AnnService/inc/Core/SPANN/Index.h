@@ -214,6 +214,7 @@ namespace SPTAG
             std::shared_ptr<std::uint64_t> m_vectorTranslateMap;
             std::unordered_map<std::string, std::string> m_headParameters;
             //std::unique_ptr<std::shared_timed_mutex[]> m_rwLocks;
+            std::vector<std::string> m_postingVecs;
             COMMON::FineGrainedRWLock m_rwLocks;
 
             // std::unique_ptr<std::atomic_uint32_t[]> m_postingSizes;
@@ -553,6 +554,8 @@ namespace SPTAG
                         LOG(Helper::LogLevel::LL_Info, "Replica Count Dist: %d, %d\n", i, replicaCountDist[i]);
                     }
                 }
+                m_postingVecs.clear();
+                m_postingVecs.resize(m_index->GetNumSamples());
                 #pragma omp parallel for num_threads(10)
                 for (int id = 0; id < postingListSize.size(); id++) 
                 {
@@ -576,6 +579,7 @@ namespace SPTAG
                         postinglist += Helper::Convert::Serialize<T>(fullVectors->GetVector(fullID), dim);
                     }
                     m_extraSearcher->OverrideIndex(id, postinglist);
+                    // m_postingVecs[id] = postinglist;
                     m_postingSizes.UpdateSize(id, postingListSize[id]);
                 }
                 auto rebuildTimeEnd = std::chrono::high_resolution_clock::now();
@@ -859,7 +863,17 @@ namespace SPTAG
 
             void PreReassign(std::shared_ptr<Helper::VectorSetReader>& p_reader) 
             {
+                LOG(Helper::LogLevel::LL_Info, "Begin PreReassign\n");
                 std::atomic_bool doneReassign = false;
+                m_index->UpdateIndex();
+                // m_postingVecs.clear();
+                // m_postingVecs.resize(m_index->GetNumSamples());
+                // LOG(Helper::LogLevel::LL_Info, "Setting\n");
+                // #pragma omp parallel for num_threads(32)
+                // for (int i = 0; i < m_index->GetNumSamples(); i++) {
+                //     m_extraSearcher->SearchIndex(i, m_postingVecs[i]);
+                // }
+                LOG(Helper::LogLevel::LL_Info, "Into PreReassign Loop\n");
                 while (!doneReassign) {
                     auto preReassignTimeBegin = std::chrono::high_resolution_clock::now();
                     doneReassign = true;
@@ -883,6 +897,7 @@ namespace SPTAG
                                 if (m_postingSizes.GetSize(index) >= limit) 
                                 {
                                     doneReassign = false;
+                                    // std::string postingList = m_postingVecs[index];
                                     std::string postingList;
                                     m_extraSearcher->SearchIndex(index, postingList);
                                     auto* postingP = reinterpret_cast<uint8_t*>(&postingList.front());
@@ -939,6 +954,13 @@ namespace SPTAG
                     auto preReassignTimeEnd = std::chrono::high_resolution_clock::now();
                     double elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(preReassignTimeEnd - preReassignTimeBegin).count();
                     LOG(Helper::LogLevel::LL_Info, "rebuild cost: %.2lf s\n", elapsedSeconds);
+                    m_index->SaveIndex(m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder);
+                    LOG(Helper::LogLevel::LL_Info, "SPFresh: ReWriting SSD Info\n");
+                    m_postingSizes.Save(m_options.m_ssdInfoFile);
+                    for (int i = 0; i < m_index->GetNumSamples(); i++) {
+                        m_extraSearcher->DeleteIndex(i);
+                    }
+                    ForceCompaction();
                     Rebuild(p_reader);
                     ForceCompaction();
                     CalculatePostingDistribution();

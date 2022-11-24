@@ -714,9 +714,9 @@ namespace SPTAG {
                     do {
                         insert_status = insert_future.wait_for(std::chrono::milliseconds(3000));
                         if (insert_status == std::future_status::timeout) {
-                            ShowMemoryStatus(vectorSet, sw.getElapsedSec());
+                            // ShowMemoryStatus(vectorSet, sw.getElapsedSec());
                             if(p_opts.m_searchDuringUpdate) StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, curCount, p_opts, sw.getElapsedSec());
-                            p_index->GetDBStat();
+                            // p_index->GetDBStat();
                         }
                     }while (insert_status != std::future_status::ready);
 

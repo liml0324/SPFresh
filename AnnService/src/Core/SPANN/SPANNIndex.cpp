@@ -633,7 +633,7 @@ namespace SPTAG
 					LOG(Helper::LogLevel::LL_Info, "Current posting num: %d.\n", m_postingSizes.GetPostingNum());
 
                     CalculatePostingDistribution();
-                    if (m_options.m_preReassign && m_options.m_buildSsdIndex) {
+                    if (m_options.m_preReassign) {
                         PreReassign(p_reader);
                         m_index->SaveIndex(m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder);
                         LOG(Helper::LogLevel::LL_Info, "SPFresh: ReWriting SSD Info\n");
