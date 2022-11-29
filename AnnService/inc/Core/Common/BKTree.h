@@ -99,7 +99,7 @@ namespace SPTAG
                 for (int k = 1; k < _K; k++) pos[k] = pos[k - 1] + newCounts[k - 1];
 
                 for (int k = 0; k < _K; k++) {
-                    if (newCounts[k] == 0) continue;
+                    if (counts[k] == 0) continue;
                     SizeType i = pos[k];
                     while (newCounts[k] > 0) {
                         SizeType swapid = pos[label[i]] + newCounts[label[i]] - 1;
@@ -363,6 +363,14 @@ namespace SPTAG
                 currDist = KmeansAssign(data, indices, first, last, args, false, 0);
                 for (int k = 0; k < args._DK; k++) {
                     if (args.clusterIdx[k] != -1) std::memcpy(args.centers + k * args._D, data[args.clusterIdx[k]], sizeof(T) * args._D);
+                }
+                std::memcpy(args.counts, args.newCounts, sizeof(SizeType) * args._K);
+                if (debug) {
+                    std::string log = "";
+                    for (int k = 0; k < args._DK; k++) {
+                        log += std::to_string(args.counts[k]) + " ";
+                    }
+                    LOG(Helper::LogLevel::LL_Info, "not virtualCenter: dist:%f lambda:(%f,%f) counts:%s\n", currDist, originalLambda, adjustedLambda, log.c_str());
                 }
             }
 

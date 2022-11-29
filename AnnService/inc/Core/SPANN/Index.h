@@ -145,7 +145,9 @@ namespace SPTAG
 
             public:
                 Dispatcher(std::shared_ptr<PersistentBuffer> pb, std::size_t batch, std::shared_ptr<ThreadPool> append, std::shared_ptr<ThreadPool> reassign, Index* m_index)
-                        : m_persistentBuffer(pb), batch(batch), appendThreadPool(append), reassignThreadPool(reassign), m_index(m_index) {}
+                        : m_persistentBuffer(pb), batch(batch), appendThreadPool(append), reassignThreadPool(reassign), m_index(m_index) {
+                            LOG(Helper::LogLevel::LL_Info, "Dispatcher: batch size: %d\n", batch);
+                        }
 
                 ~Dispatcher() { running = false; t.join(); }
 

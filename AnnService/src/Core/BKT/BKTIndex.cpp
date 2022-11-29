@@ -595,11 +595,11 @@ namespace SPTAG
         ErrorCode
             Index<T>::UpdateIndex()
         {
-            m_pTrees.Rebuild(m_pSamples, m_iDistCalcMethod, nullptr);
+            // m_pTrees.Rebuild(m_pSamples, m_iDistCalcMethod, nullptr);
             // temporarily reuse this api to rebuild bkt tree
-            // omp_set_num_threads(m_iNumberOfThreads);
-            // m_workSpacePool.reset(new COMMON::WorkSpacePool<COMMON::WorkSpace>());
-            // m_workSpacePool->Init(m_iNumberOfThreads, max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
+            omp_set_num_threads(m_iNumberOfThreads);
+            m_workSpacePool.reset(new COMMON::WorkSpacePool<COMMON::WorkSpace>());
+            m_workSpacePool->Init(m_iNumberOfThreads, max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             return ErrorCode::Success;
         }
 

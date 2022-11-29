@@ -1001,6 +1001,7 @@ namespace SPTAG
             SPTAG::COMMON::KmeansArgs<ValueType> args(2, smallSample.C(), (SizeType)localIndicesInsert.size(), 1, m_index->GetDistCalcMethod());
             std::shuffle(localIndices.begin(), localIndices.end(), std::mt19937(std::random_device()()));
             int numClusters = SPTAG::COMMON::KmeansClustering(smallSample, localIndices, 0, (SizeType)localIndices.size(), args, 1000, 100.0F, false, nullptr, m_options.m_virtualHead);
+            // exit(0);
             if (numClusters <= 1)
             {
                 LOG(Helper::LogLevel::LL_Info, "Cluserting Failed (The same vector), Cut to limit\n");
