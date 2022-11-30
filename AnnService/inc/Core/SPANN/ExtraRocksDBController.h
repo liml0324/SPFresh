@@ -56,15 +56,15 @@ namespace SPTAG::SPANN
                 dbOptions.merge_operator.reset(new AnnMergeOperator);
 
                 // SST file size options
-                // dbOptions.target_file_size_base = 1024UL * 1024 * 1024;
-                // dbOptions.target_file_size_multiplier = 2;
-                // dbOptions.max_bytes_for_level_base = 16 * 1024UL * 1024 * 1024;
-                // dbOptions.max_bytes_for_level_multiplier = 4;
-                // dbOptions.max_subcompactions = 16;
-                // dbOptions.num_levels = 4;
-                // dbOptions.level0_file_num_compaction_trigger = 1;
-                // dbOptions.level_compaction_dynamic_level_bytes = false;
-                // dbOptions.write_buffer_size = 1024UL * 1024 * 1024;
+                dbOptions.target_file_size_base = 1024UL * 1024 * 1024;
+                dbOptions.target_file_size_multiplier = 2;
+                dbOptions.max_bytes_for_level_base = 16 * 1024UL * 1024 * 1024;
+                dbOptions.max_bytes_for_level_multiplier = 4;
+                dbOptions.max_subcompactions = 16;
+                dbOptions.num_levels = 4;
+                dbOptions.level0_file_num_compaction_trigger = 1;
+                dbOptions.level_compaction_dynamic_level_bytes = false;
+                dbOptions.write_buffer_size = 1024UL * 1024 * 1024;
 
                 // rate limiter options
                 // dbOptions.rate_limiter.reset(rocksdb::NewGenericRateLimiter(100UL << 20));
@@ -88,8 +88,8 @@ namespace SPTAG::SPANN
                 table_options.no_block_cache = true;
 
                 // filter options
-                // table_options.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10, true));
-                // table_options.optimize_filters_for_memory = true;
+                table_options.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10, true));
+                table_options.optimize_filters_for_memory = true;
 
                 dbOptions.table_factory.reset(rocksdb::NewBlockBasedTableFactory(table_options));
                 // dbOptions.statistics = rocksdb::CreateDBStatistics();

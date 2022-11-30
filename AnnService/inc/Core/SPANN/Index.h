@@ -252,7 +252,7 @@ namespace SPTAG
             uint32_t m_theSameHeadNum{0};
             uint32_t m_reAssignNum{0};
             uint32_t m_garbageNum{0};
-            std::atomic_uint64_t m_reAssignScanNum{0};
+            uint64_t m_reAssignScanNum{0};
             std::mutex m_dataAddLock;
 
         public:
@@ -392,7 +392,7 @@ namespace SPTAG
             
             int getGarbageNum() {return m_garbageNum;}
 
-            unsigned long getReAssignScanNum() {return m_reAssignScanNum.load();}
+            unsigned long getReAssignScanNum() {return m_reAssignScanNum;}
 
             void UpdateStop()
             {
@@ -867,7 +867,7 @@ namespace SPTAG
             {
                 LOG(Helper::LogLevel::LL_Info, "Begin PreReassign\n");
                 std::atomic_bool doneReassign = false;
-                m_index->UpdateIndex();
+                // m_index->UpdateIndex();
                 // m_postingVecs.clear();
                 // m_postingVecs.resize(m_index->GetNumSamples());
                 // LOG(Helper::LogLevel::LL_Info, "Setting\n");
@@ -973,6 +973,98 @@ namespace SPTAG
             void GetDBStat() 
             {
                 m_extraSearcher->GetDBStats();
+            }
+
+            int ClusteringSPFresh(const COMMON::Dataset<T>& data, 
+            std::vector<SizeType>& indices, const SizeType first, const SizeType last, 
+            COMMON::KmeansArgs<T>& args, int tryIters, bool debug, bool virtualCenter)
+            {
+                int bestCount = -1;
+                for (int numKmeans = 0; numKmeans < tryIters; numKmeans++) {
+                    for (int k = 0; k < args._DK; k++) {
+                        SizeType randid = COMMON::Utils::rand(last, first);
+                        std::memcpy(args.centers + k*args._D, data[indices[randid]], sizeof(T)*args._D);
+                    }
+                    args.ClearCounts();
+                    args.ClearDists(-MaxDist);
+                    COMMON::KmeansAssign(data, indices, first, last, args, true, 0);
+                    int tempCount = __INT_MAX__;
+                    for (int i = 0; i < args._K; i++) if (args.newCounts[i] < tempCount) tempCount = args.newCounts[i];
+                    if (tempCount > bestCount) {
+                        bestCount = tempCount;
+                        memcpy(args.newTCenters, args.centers, sizeof(T)*args._K*args._D);
+                        memcpy(args.counts, args.newCounts, sizeof(SizeType) * args._K);
+                    }
+                }
+                float currDiff, currDist, minClusterDist = MaxDist;
+                int noImprovement = 0;
+                for (int iter = 0; iter < 100; iter++) {
+                    std::memcpy(args.centers, args.newTCenters, sizeof(T)*args._K*args._D);
+                    std::random_shuffle(indices.begin() + first, indices.begin() + last);
+                    args.ClearCenters();
+                    args.ClearCounts();
+                    args.ClearDists(-MaxDist);
+                    currDist = COMMON::KmeansAssign(data, indices, first, last, args, true, 0);
+                    std::memcpy(args.counts, args.newCounts, sizeof(SizeType) * args._K);
+
+                    if (currDist < minClusterDist) {
+                        noImprovement = 0;
+                        minClusterDist = currDist;
+                    }
+                    else {
+                        noImprovement++;
+                    }
+                    
+                    if (debug) {
+                        std::string log = "";
+                        for (int k = 0; k < args._DK; k++) {
+                            log += std::to_string(args.counts[k]) + " ";
+                        }
+                        LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f counts:%s\n", iter, currDist, log.c_str());
+                    }
+
+                    currDiff = COMMON::RefineCenters(data, args);
+                    if (debug) LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f diff:%f\n", iter, currDist, currDiff);
+
+                    if (currDiff < 1e-3 || noImprovement >= 5) break;
+                }
+
+                if (!virtualCenter) {
+                    args.ClearCounts();
+                    args.ClearDists(MaxDist);
+                    currDist = KmeansAssign(data, indices, first, last, args, false, 0);
+                    for (int k = 0; k < args._DK; k++) {
+                        if (args.clusterIdx[k] != -1) std::memcpy(args.centers + k * args._D, data[args.clusterIdx[k]], sizeof(T) * args._D);
+                    }
+                    std::memcpy(args.counts, args.newCounts, sizeof(SizeType) * args._K);
+                    if (debug) {
+                        std::string log = "";
+                        for (int k = 0; k < args._DK; k++) {
+                            log += std::to_string(args.counts[k]) + " ";
+                        }
+                        LOG(Helper::LogLevel::LL_Info, "not virtualCenter: dist:%f counts:%s\n", currDist, log.c_str());
+                    }
+                } 
+
+                args.ClearCounts();
+                args.ClearDists(MaxDist);
+                currDist = COMMON::KmeansAssign(data, indices, first, last, args, false, 0);
+                memcpy(args.counts, args.newCounts, sizeof(SizeType) * args._K);
+
+                SizeType maxCount = 0, minCount = (std::numeric_limits<SizeType>::max)(), availableClusters = 0;
+                float CountStd = 0.0, CountAvg = (last - first) * 1.0f / args._DK;
+                for (int i = 0; i < args._DK; i++) {
+                    if (args.counts[i] > maxCount) maxCount = args.counts[i];
+                    if (args.counts[i] < minCount) minCount = args.counts[i];
+                    CountStd += (args.counts[i] - CountAvg) * (args.counts[i] - CountAvg);
+                    if (args.counts[i] > 0) availableClusters++;
+                }
+                CountStd = sqrt(CountStd / args._DK) / CountAvg;
+                if (debug) LOG(Helper::LogLevel::LL_Info, "Max:%d Min:%d Avg:%f Std/Avg:%f Dist:%f NonZero/Total:%d/%d\n", maxCount, minCount, CountAvg, CountStd, currDist, availableClusters, args._DK);
+                int numClusters = 0;
+                for (int i = 0; i < args._K; i++) if (args.counts[i] > 0) numClusters++;
+                args.Shuffle(indices, first, last);
+                return numClusters;
             }
         };
     } // namespace SPANN

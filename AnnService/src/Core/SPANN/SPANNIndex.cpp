@@ -1001,6 +1001,7 @@ namespace SPTAG
             SPTAG::COMMON::KmeansArgs<ValueType> args(2, smallSample.C(), (SizeType)localIndicesInsert.size(), 1, m_index->GetDistCalcMethod());
             std::shuffle(localIndices.begin(), localIndices.end(), std::mt19937(std::random_device()()));
             int numClusters = SPTAG::COMMON::KmeansClustering(smallSample, localIndices, 0, (SizeType)localIndices.size(), args, 1000, 100.0F, false, nullptr, m_options.m_virtualHead);
+            // int numClusters = ClusteringSPFresh(smallSample, localIndices, 0, localIndices.size(), args, 10, false, m_options.m_virtualHead);
             // exit(0);
             if (numClusters <= 1)
             {
@@ -1205,16 +1206,11 @@ namespace SPTAG
                              std::map<SizeType, SizeType>& HeadPrevs, std::map<SizeType, uint8_t>& versions)
         {
             for (auto it = reAssignVectors.begin(); it != reAssignVectors.end(); ++it) {
-                //PrintFirstFiveDimInt8(reinterpret_cast<uint8_t*>(it->second), it->first);
+
                 auto vectorContain = std::make_shared<std::string>(Helper::Convert::Serialize<uint8_t>(it->second, m_options.m_dim));
-                //PrintFirstFiveDimInt8(reinterpret_cast<uint8_t*>(&vectorContain->front()), it->first);
+
                 ReassignAsync(vectorContain, it->first, HeadPrevs[it->first], versions[it->first]);
             }
-            /*
-            while (!m_dispatcher->reassignFinished()) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            }
-            */
         }
 
         template <typename ValueType>
@@ -1224,12 +1220,6 @@ namespace SPTAG
             m_reAssignNum++;
 
             bool isNeedReassign = true;
-            /*
-            uint8_t version;
-            if (isNeedReassign) {
-                m_versionMap.IncVersion(VID, &version);
-            */
-
 
             COMMON::QueryResultSet<ValueType> p_queryResults(NULL, m_options.m_internalResultNum);
             p_queryResults.SetTarget(reinterpret_cast<ValueType*>(&vectorContain->front()));
@@ -1261,20 +1251,17 @@ namespace SPTAG
 
                 selections[replicaCount].headID = queryResults[i].VID;
 
-                /*
-                if (queryResults[i].VID == HeadPrev) {
-                    isNeedReassign = false;
-                    break;
-                }
-                */
-
                 selections[replicaCount].fullID = VID;
                 selections[replicaCount].distance = queryResults[i].Dist;
                 selections[replicaCount].order = (char)replicaCount;
+                if (selections[replicaCount].headID == HeadPrev) {
+                    isNeedReassign = false;
+                    break;
+                }
                 ++replicaCount;
             }
 
-            if (CheckVersionValid(VID, version)) {
+            if (isNeedReassign && CheckVersionValid(VID, version)) {
                 // LOG(Helper::LogLevel::LL_Info, "Update Version: VID: %d, version: %d, current version: %d\n", VID, version, m_versionMap.GetVersion(VID));
                 m_versionMap.IncVersion(VID, &version);
             } else {
@@ -1295,11 +1282,6 @@ namespace SPTAG
                     // LOG(Helper::LogLevel::LL_Info, "Head Miss: VID: %d, current version: %d, another re-assign\n", VID, version);
                     isNeedReassign = false;
                 }
-                
-                // if (m_extraSearcher->AppendPosting(headID, newPart) != ErrorCode::Success) {
-                //     LOG(Helper::LogLevel::LL_Error, "Merge failed!\n");
-                // }
-                // m_postingSizes[headID].fetch_add(1, std::memory_order_relaxed);
             }
             return isNeedReassign;
         }
@@ -1307,7 +1289,6 @@ namespace SPTAG
         template <typename ValueType>
         ErrorCode SPTAG::SPANN::Index<ValueType>::Append(SizeType headID, int appendNum, std::string& appendPosting)
         {
-            int reassignExtraLimit = 0;
             if (appendPosting.empty()) {
                 LOG(Helper::LogLevel::LL_Error, "Error! empty append posting!\n");
             }
@@ -1317,11 +1298,6 @@ namespace SPTAG
 
             if (appendNum == 0) {
                 LOG(Helper::LogLevel::LL_Info, "Error!, headID :%d, appendNum:%d\n", headID, appendNum);
-            }
-
-            if (appendNum == -1) {
-                appendNum = 1;
-                reassignExtraLimit = 3;
             }
 
         checkDeleted:
@@ -1341,7 +1317,7 @@ namespace SPTAG
                 }
                 return ErrorCode::Undefined;
             }
-            if (m_postingSizes.GetSize(headID) + appendNum > (m_extraSearcher->GetPostingSizeLimit() + reassignExtraLimit) ) {
+            if (m_postingSizes.GetSize(headID) + appendNum > (m_extraSearcher->GetPostingSizeLimit()) ) {
                 if (Split(headID, appendNum, appendPosting) == ErrorCode::FailSplit) {
                     goto checkDeleted;
                 }

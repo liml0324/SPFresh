@@ -460,7 +460,7 @@ namespace SPTAG {
                 return fileName;
             }
 
-            std::shared_ptr<VectorSet> LoadVectorSet(SPANN::Options& p_opts, int numThreads)
+            std::shared_ptr<VectorSet>  LoadVectorSet(SPANN::Options& p_opts, int numThreads)
             {
                 std::shared_ptr<VectorSet> vectorSet;
                 LOG(Helper::LogLevel::LL_Info, "Start loading VectorSet...\n");
@@ -724,9 +724,19 @@ namespace SPTAG {
                     finishedInsert += step;
                     LOG(Helper::LogLevel::LL_Info, "Total Vector num %d \n", curCount);
 
-                    LOG(Helper::LogLevel::LL_Info, "After %d insertion, head vectors split %d times, head missing %d times, same head %d times, reassign %d(%.2lf) times, reassign scan %ld times, garbage collection %d times\n", finishedInsert, p_index->getSplitTimes(), p_index->getHeadMiss(), p_index->getSameHead(), p_index->getReassignNum(), p_index->getReassignNum(), p_index->getReAssignScanNum(), p_index->getGarbageNum());
+                    LOG(Helper::LogLevel::LL_Info, "After %d insertion, head vectors split %d times, head missing %d times, same head %d times, reassign %d times, reassign scan %ld times, garbage collection %d times\n", finishedInsert, p_index->getSplitTimes(), p_index->getHeadMiss(), p_index->getSameHead(), p_index->getReassignNum(), p_index->getReAssignScanNum(), p_index->getGarbageNum());
 
                     ShowMemoryStatus(vectorSet, sw.getElapsedSec());
+                    // p_opts.m_calTruth = calTruthOrigin;
+                    // StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, curCount, p_opts, sw.getElapsedSec());
+                    // if (!p_opts.m_vectorPath.empty() && fileexists(p_opts.m_vectorPath.c_str())) {
+                    //     std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(p_opts.m_valueType, p_opts.m_dim, p_opts.m_vectorType, p_opts.m_vectorDelimiter));
+                    //     auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
+                    //     if (ErrorCode::Success == vectorReader->LoadFile(p_opts.m_fullVectorPath))
+                    //     {
+                    //         p_index->Rebuild(vectorReader, curCount);
+                    //     }
+                    // }
                     p_index->CalculatePostingDistribution();
                     // p_index->ForceCompaction();
 
