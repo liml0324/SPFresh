@@ -921,7 +921,8 @@ namespace SPTAG
                 if (i == 0) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 } else {
-                    //LOG(Helper::LogLevel::LL_Info, "Process Append Assignments: %d, Delete Assignments: %d\n", newPart.size(), deletedVector.size());
+                    // LOG(Helper::LogLevel::LL_Info, "Dispatcher: Process Append Assignments: %d, after batched: %d\n", i, newPart.size());
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 }
             }
         }

@@ -91,7 +91,7 @@ namespace SPTAG
 
             size_t jobsize()
             {
-                std::lock_guard<std::mutex> lock(m_lock);
+                // std::lock_guard<std::mutex> lock(m_lock);
                 return m_jobs.size();
             }
 

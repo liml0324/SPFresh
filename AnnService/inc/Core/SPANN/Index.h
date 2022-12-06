@@ -172,6 +172,11 @@ namespace SPTAG
                 {
                     return reassignThreadPool->allClear();
                 }
+
+                void GetStatus(SizeType* appendJobsNum, SizeType* reassignJobsNum) {
+                    *appendJobsNum = appendThreadPool->jobsize();
+                    *reassignJobsNum = reassignThreadPool->jobsize();
+                }
             };
 
             struct EdgeInsert
@@ -394,10 +399,21 @@ namespace SPTAG
 
             unsigned long getReAssignScanNum() {return m_reAssignScanNum;}
 
+            void GetAppendReassignPoolStatus(int* appendJobs, int* reassignJobs, int* dispatcherJobs) 
+            {
+                m_dispatcher->GetStatus(appendJobs, reassignJobs);
+                *dispatcherJobs = m_assignmentQueue.unsafe_size();
+            }
+
             void UpdateStop()
             {
                 m_persistentBuffer->StopPB();
                 m_dispatcher->stop();
+            }
+
+            void PrintUpdateStatus(int finishedInsert)
+            {
+                LOG(Helper::LogLevel::LL_Info, "After %d insertion, head vectors split %d times, head missing %d times, same head %d times, reassign %d times, reassign scan %ld times, garbage collection %d times\n", finishedInsert, getSplitTimes(), getHeadMiss(), getSameHead(), getReassignNum(), getReAssignScanNum(), getGarbageNum());
             }
 
             void Rebuild(std::shared_ptr<Helper::VectorSetReader>& p_reader, SizeType upperBound = -1)

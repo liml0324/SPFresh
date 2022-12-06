@@ -614,7 +614,7 @@ namespace SPTAG {
                 LOG(Helper::LogLevel::LL_Info,"During Update\n");
                 while(!p_index->AllFinishedExceptReassign())
                 {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    std::this_thread::sleep_for(std::chrono::milliseconds(20));
                 }
                 double appendSyncingCost = sw.getElapsedSec();
                 LOG(Helper::LogLevel::LL_Info,
@@ -625,7 +625,7 @@ namespace SPTAG {
 
                 while(!p_index->AllFinished())
                 {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                    std::this_thread::sleep_for(std::chrono::milliseconds(20));
                 }
                 double syncingCost = sw.getElapsedSec();
                 LOG(Helper::LogLevel::LL_Info,
@@ -695,6 +695,7 @@ namespace SPTAG {
                 
                 int finishedInsert = 0;
                 int insertThreads = p_opts.m_insertThreadNum;
+                int appendJobs, reassignJobs, dispatcherJobs;
 
                 LOG(Helper::LogLevel::LL_Info, "Updating: numThread: %d, step: %d, totalBatch: %d.\n", insertThreads, step, batch);
 
@@ -712,11 +713,13 @@ namespace SPTAG {
 
                     p_opts.m_calTruth = false;
                     do {
-                        insert_status = insert_future.wait_for(std::chrono::milliseconds(3000));
+                        insert_status = insert_future.wait_for(std::chrono::seconds(3));
                         if (insert_status == std::future_status::timeout) {
                             ShowMemoryStatus(vectorSet, sw.getElapsedSec());
+                            p_index->GetAppendReassignPoolStatus(&appendJobs, &reassignJobs, &dispatcherJobs);
+                            LOG(Helper::LogLevel::LL_Info, "remain appendJobs: %d, reassignJobs: %d, dispatcherJobs: %d\n", appendJobs, reassignJobs, dispatcherJobs);
                             if(p_opts.m_searchDuringUpdate) StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, curCount, p_opts, sw.getElapsedSec());
-                            p_index->GetDBStat();
+                            // p_index->GetDBStat();
                         }
                     }while (insert_status != std::future_status::ready);
 
@@ -724,7 +727,7 @@ namespace SPTAG {
                     finishedInsert += step;
                     LOG(Helper::LogLevel::LL_Info, "Total Vector num %d \n", curCount);
 
-                    LOG(Helper::LogLevel::LL_Info, "After %d insertion, head vectors split %d times, head missing %d times, same head %d times, reassign %d times, reassign scan %ld times, garbage collection %d times\n", finishedInsert, p_index->getSplitTimes(), p_index->getHeadMiss(), p_index->getSameHead(), p_index->getReassignNum(), p_index->getReAssignScanNum(), p_index->getGarbageNum());
+                    p_index->PrintUpdateStatus(finishedInsert);
 
                     ShowMemoryStatus(vectorSet, sw.getElapsedSec());
                     // p_opts.m_calTruth = calTruthOrigin;
