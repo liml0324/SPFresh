@@ -1278,7 +1278,7 @@ namespace SPTAG
                 newPart += Helper::Convert::Serialize<ValueType>(p_queryResults.GetTarget(), m_options.m_dim);
                 auto headID = selections[i].headID;
                 //LOG(Helper::LogLevel::LL_Info, "Reassign: headID :%d, oldVID:%d, newVID:%d, posting length: %d, dist: %f, string size: %d\n", headID, oldVID, VID, m_postingSizes[headID].load(), selections[i].distance, newPart.size());
-                if (ErrorCode::Undefined == Append(headID, 1, newPart)) {
+                if (ErrorCode::Undefined == Append(headID, -1, newPart)) {
                     // LOG(Helper::LogLevel::LL_Info, "Head Miss: VID: %d, current version: %d, another re-assign\n", VID, version);
                     isNeedReassign = false;
                 }
@@ -1289,6 +1289,7 @@ namespace SPTAG
         template <typename ValueType>
         ErrorCode SPTAG::SPANN::Index<ValueType>::Append(SizeType headID, int appendNum, std::string& appendPosting)
         {
+            int reassignThreshold = 0;
             if (appendPosting.empty()) {
                 LOG(Helper::LogLevel::LL_Error, "Error! empty append posting!\n");
             }
@@ -1298,6 +1299,9 @@ namespace SPTAG
 
             if (appendNum == 0) {
                 LOG(Helper::LogLevel::LL_Info, "Error!, headID :%d, appendNum:%d\n", headID, appendNum);
+            } else if (appendNum == -1) {
+                // for reassign
+                reassignThreshold = 3;
             }
 
         checkDeleted:
@@ -1317,7 +1321,7 @@ namespace SPTAG
                 }
                 return ErrorCode::Undefined;
             }
-            if (m_postingSizes.GetSize(headID) + appendNum > (m_extraSearcher->GetPostingSizeLimit()) ) {
+            if (m_postingSizes.GetSize(headID) + appendNum > (m_extraSearcher->GetPostingSizeLimit() + reassignThreshold)) {
                 if (Split(headID, appendNum, appendPosting) == ErrorCode::FailSplit) {
                     goto checkDeleted;
                 }
