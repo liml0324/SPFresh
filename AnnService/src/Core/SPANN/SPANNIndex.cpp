@@ -1303,6 +1303,7 @@ namespace SPTAG
             } else if (appendNum == -1) {
                 // for reassign
                 reassignThreshold = 3;
+                appendNum = 1;
             }
 
         checkDeleted:

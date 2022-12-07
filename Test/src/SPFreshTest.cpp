@@ -717,9 +717,10 @@ namespace SPTAG {
                         if (insert_status == std::future_status::timeout) {
                             ShowMemoryStatus(vectorSet, sw.getElapsedSec());
                             p_index->GetAppendReassignPoolStatus(&appendJobs, &reassignJobs, &dispatcherJobs);
+                            p_index->PrintUpdateStatus(-1);
                             LOG(Helper::LogLevel::LL_Info, "remain appendJobs: %d, reassignJobs: %d, dispatcherJobs: %d\n", appendJobs, reassignJobs, dispatcherJobs);
                             if(p_opts.m_searchDuringUpdate) StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, curCount, p_opts, sw.getElapsedSec());
-                            // p_index->GetDBStat();
+                            p_index->GetDBStat();
                         }
                     }while (insert_status != std::future_status::ready);
 
