@@ -548,7 +548,7 @@ namespace SPTAG {
                     for (int j = 0; j < p_index->GetMemoryIndex()->GetNumSamples(); j++)
                     {
                         results[j % numQueries].SetTarget(p_index->GetMemoryIndex()->GetSample(j));
-                        if (j == numQueries) {
+                        if (j % numQueries == 0 || j == p_index->GetMemoryIndex()->GetNumSamples()) {
                              LOG(Helper::LogLevel::LL_Info, "Batching: %d\n", numQueries);
                             totalQPS += SearchSequential(p_index, numThreads, results, stats, queryCountLimit, internalResultNum);
                             PrintStats<ValueType>(stats);
