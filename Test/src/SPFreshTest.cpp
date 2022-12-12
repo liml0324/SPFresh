@@ -532,7 +532,7 @@ namespace SPTAG {
                 int numQueries = querySet->Count();
 
                 std::vector<QueryResult> results(numQueries, QueryResult(NULL, internalResultNum, false));
-
+                LOG(Helper::LogLevel::LL_Info, "Searching For All Head\n");
                 LOG(Helper::LogLevel::LL_Info, "Searching: numThread: %d, numQueries: %d, searchTimes: %d.\n", numThreads, numQueries, avgStatsNum);
                 std::vector<SPANN::SearchStats> stats(numQueries);
                 std::vector<SPANN::SearchStats> TotalStats(numQueries);
@@ -540,12 +540,21 @@ namespace SPTAG {
                 double totalQPS = 0;
                 for (int i = 0; i < avgStatsNum; i++)
                 {
-                    for (int j = 0; j < numQueries; ++j)
+                    // for (int j = 0; j < numQueries; ++j)
+                    // {
+                    //     results[j].SetTarget(reinterpret_cast<ValueType*>(querySet->GetVector(j)));
+                    //     results[j].Reset();
+                    // }
+                    for (int j = 0; j < p_index->GetMemoryIndex()->GetNumSamples(); j++)
                     {
-                        results[j].SetTarget(reinterpret_cast<ValueType*>(querySet->GetVector(j)));
-                        results[j].Reset();
+                        results[j % numQueries].SetTarget(p_index->GetMemoryIndex()->GetSample(j));
+                        if (j == numQueries) {
+                             LOG(Helper::LogLevel::LL_Info, "Batching: %d\n", numQueries);
+                            totalQPS += SearchSequential(p_index, numThreads, results, stats, queryCountLimit, internalResultNum);
+                            PrintStats<ValueType>(stats);
+                        }
                     }
-                    totalQPS += SearchSequential(p_index, numThreads, results, stats, queryCountLimit, internalResultNum);
+                    // totalQPS += SearchSequential(p_index, numThreads, results, stats, queryCountLimit, internalResultNum);
                     //PrintStats<ValueType>(stats);
                     AddStats(TotalStats, stats);
                 }
@@ -555,17 +564,17 @@ namespace SPTAG {
 
                 PrintStats<ValueType>(TotalStats);
 
-                if (p_opts.m_calTruth)
-                {
-                    if (p_opts.m_searchResult.empty()) {
-                        std::vector<std::set<SizeType>> truth;
-                        int truthK = p_opts.m_resultNum;
-                        LoadTruth(p_opts, truth, numQueries, GetTruthFileName(p_opts.m_truthFilePrefix, curCount), truthK);
-                        CalculateRecallSPFresh<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, p_opts.m_resultNum, truthK, querySet, vectorSet, numQueries);
-                    } else {
-                        OutputResult<ValueType>(GetTruthFileName(p_opts.m_searchResult, curCount), results, p_opts.m_resultNum);
-                    }
-                }
+                // if (p_opts.m_calTruth)
+                // {
+                //     if (p_opts.m_searchResult.empty()) {
+                //         std::vector<std::set<SizeType>> truth;
+                //         int truthK = p_opts.m_resultNum;
+                //         LoadTruth(p_opts, truth, numQueries, GetTruthFileName(p_opts.m_truthFilePrefix, curCount), truthK);
+                //         CalculateRecallSPFresh<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, p_opts.m_resultNum, truthK, querySet, vectorSet, numQueries);
+                //     } else {
+                //         OutputResult<ValueType>(GetTruthFileName(p_opts.m_searchResult, curCount), results, p_opts.m_resultNum);
+                //     }
+                // }
             }
 
             template <typename ValueType>
