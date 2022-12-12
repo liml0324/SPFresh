@@ -990,7 +990,7 @@ namespace SPTAG
                 }
                 m_garbageNum++;
                 auto GCEnd = std::chrono::high_resolution_clock::now();
-                double elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(GCEnd - splitBegin).count();
+                double elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(GCEnd - splitBegin).count();
                 m_garbageCost += elapsedMSeconds;
                 return ErrorCode::Success;
             }
@@ -1150,11 +1150,16 @@ namespace SPTAG
                         HeadPrevToSplitHeadDist.push_back(queryResults[i].Dist);
                     }
                 }
+                auto reassignScanIOBegin = std::chrono::high_resolution_clock::now();
                 std::vector<std::string> tempPostingLists;
                 if (m_extraSearcher->SearchIndexMulti(HeadPrevTopK, &tempPostingLists) != ErrorCode::Success) {
                     LOG(Helper::LogLevel::LL_Info, "ReAssign can't get all the near postings\n");
                     exit(0);
                 }
+                auto reassignScanIOEnd = std::chrono::high_resolution_clock::now();
+                auto elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(reassignScanIOEnd - reassignScanIOBegin).count();
+
+                m_reassignScanIOCost += elapsedMSeconds;
                 for (int i = 0; i < HeadPrevTopK.size(); i++) {
                     postingLists.push_back(tempPostingLists[i]);
                 }
@@ -1215,7 +1220,6 @@ namespace SPTAG
 
             ReAssignVectors(reAssignVectorsTop0, reAssignVectorsHeadPrevTop0, versionsTop0);
             ReAssignVectors(reAssignVectorsTopK, reAssignVectorsHeadPrevTopK, versionsTopK);
-//            m_reassignTotalCost += sw.getElapsedMs();
             return ErrorCode::Success;
         }
 
@@ -1368,23 +1372,27 @@ namespace SPTAG
                     // }
                     // LOG(Helper::LogLevel::LL_Info, "Merge: headID: %d, appendNum:%d\n", headID, appendNum);
                     if (!reassignThreshold) m_appendTaskNum++;
+                    auto appendIOBegin = std::chrono::high_resolution_clock::now();
                     if (m_extraSearcher->AppendPosting(headID, appendPosting) != ErrorCode::Success) {
                         LOG(Helper::LogLevel::LL_Error, "Merge failed!\n");
                         exit(1);
                     }
+                    auto appendIOEnd = std::chrono::high_resolution_clock::now();
+                    double elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(appendIOEnd - appendIOBegin).count();
+                    if (!reassignThreshold) m_appendIOCost += elapsedMSeconds;
                     m_postingSizes.IncSize(headID, appendNum);
                 }
             }
             auto appendEnd = std::chrono::high_resolution_clock::now();
             double elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(appendEnd - appendBegin).count();
-            m_appendCost += elapsedMSeconds;
+            if (!reassignThreshold) m_appendCost += elapsedMSeconds;
             return ErrorCode::Success;
         }
 
         template <typename T>
         void SPTAG::SPANN::Index<T>::ProcessAsyncReassign(std::shared_ptr<std::string> vectorContain, SizeType VID, SizeType HeadPrev, uint8_t version, std::function<void()> p_callback)
         {
-
+            // return;
             if (m_versionMap.Contains(VID) || !CheckVersionValid(VID, version)) {
                 // LOG(Helper::LogLevel::LL_Info, "ReassignID: %d, version: %d, current version: %d\n", VID, version, m_versionMap.GetVersion(VID));
                 return;

@@ -263,9 +263,11 @@ namespace SPTAG
             double m_clusteringCost{0};
             double m_updateHeadCost{0};
             double m_reassignScanCost{0};
+            double m_reassignScanIOCost{0};
 
             // Append
             double m_appendCost{0};
+            double m_appendIOCost{0};
 
             // reAssign
             double m_reAssignCost{0};
@@ -430,11 +432,13 @@ namespace SPTAG
             void PrintUpdateCostStatus()
             {
                 LOG(Helper::LogLevel::LL_Info, "AppendTaskNum: %d, TotalCost: %.3lf us, PerCost: %.3lf us\n", m_appendTaskNum, m_appendCost, m_appendCost/m_appendTaskNum);
-                LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, TotalCost: %.3lf ms, PerCost: %.3lf ms\n", m_splitNum, m_splitCost, m_splitCost/m_splitNum);
+                LOG(Helper::LogLevel::LL_Info, "AppendTaskNum: %d, AppendIO TotalCost: %.3lf us, PerCost: %.3lf us\n", m_appendTaskNum, m_appendIOCost, m_appendIOCost/m_appendTaskNum);
+                LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, TotalCost: %.3lf ms, PerCost: %.3lf ms\n", m_splitNum, m_splitCost - m_garbageCost/1000, (m_splitCost - m_garbageCost/1000)/m_splitNum);
                 LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, Clustering TotalCost: %.3lf us, PerCost: %.3lf us\n", m_splitNum, m_clusteringCost, m_clusteringCost/m_splitNum);
                 LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, UpdateHead TotalCost: %.3lf ms, PerCost: %.3lf ms\n", m_splitNum, m_updateHeadCost, m_updateHeadCost/m_splitNum);
                 LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, ReassignScan TotalCost: %.3lf ms, PerCost: %.3lf ms\n", m_splitNum, m_reassignScanCost, m_reassignScanCost/m_splitNum);
-                LOG(Helper::LogLevel::LL_Info, "GCNum: %d, TotalCost: %.3lf ms, PerCost: %.3lf ms\n", m_garbageNum, m_garbageCost, m_garbageCost/m_garbageNum);
+                LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, ReassignScanIO TotalCost: %.3lf ms, PerCost: %.3lf ms\n", m_splitNum, m_reassignScanIOCost, m_reassignScanIOCost/m_splitNum);
+                LOG(Helper::LogLevel::LL_Info, "GCNum: %d, TotalCost: %.3lf us, PerCost: %.3lf us\n", m_garbageNum, m_garbageCost, m_garbageCost/m_garbageNum);
             }
 
             void PrintUpdateStatus(int finishedInsert)
@@ -456,7 +460,9 @@ namespace SPTAG
                 m_garbageCost = 0;
                 m_updateHeadCost = 0;
                 m_reassignScanCost = 0;
+                m_reassignScanIOCost = 0;
                 m_appendCost = 0;
+                m_appendIOCost = 0;
                 m_reAssignCost = 0;
                 m_selectCost = 0;
                 m_reAssignAppendCost = 0;
@@ -864,17 +870,15 @@ namespace SPTAG
             {
                 
                 float_t splitHeadDist = m_index->ComputeDistance(data, m_index->GetSample(splitHead));
-                float_t newHeadDist_1 = m_index->ComputeDistance(data, m_index->GetSample(newHeads[0]));
-                float_t newHeadDist_2 = m_index->ComputeDistance(data, m_index->GetSample(newHeads[1]));
 
                 if (isInSplitHead) {
                     if (splitHeadDist >= currentHeadDist) return false;
                 } else {
+                    float_t newHeadDist_1 = m_index->ComputeDistance(data, m_index->GetSample(newHeads[0]));
+                    float_t newHeadDist_2 = m_index->ComputeDistance(data, m_index->GetSample(newHeads[1]));
                     if (splitHeadDist <= newHeadDist_1 && splitHeadDist <= newHeadDist_2) return false;
                     if (currentHeadDist <= newHeadDist_1 && currentHeadDist <= newHeadDist_2) return false;
                 }
-                
-
                 return true;
             }
 
