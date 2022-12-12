@@ -930,12 +930,11 @@ namespace SPTAG
         template <typename ValueType>
         ErrorCode SPTAG::SPANN::Index<ValueType>::Split(const SizeType headID, int appendNum, std::string& appendPosting)
         {
-            // TimeUtils::StopW sw;
+            auto splitBegin = std::chrono::high_resolution_clock::now();
             std::unique_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]);
             if (m_postingSizes.GetSize(headID) + appendNum < m_extraSearcher->GetPostingSizeLimit()) {
                 return ErrorCode::FailSplit;
             }
-            m_splitTaskNum++;
             std::string postingList;
             if (m_extraSearcher->SearchIndex(headID, postingList) != ErrorCode::Success) {
                 LOG(Helper::LogLevel::LL_Info, "Split fail to get oversized postings\n");
@@ -990,7 +989,9 @@ namespace SPTAG
                     exit(0);
                 }
                 m_garbageNum++;
-                // m_splitWriteBackCost += sw.getElapsedMs() - gcEndTime;
+                auto GCEnd = std::chrono::high_resolution_clock::now();
+                double elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(GCEnd - splitBegin).count();
+                m_garbageCost += elapsedMSeconds;
                 return ErrorCode::Success;
             }
             //LOG(Helper::LogLevel::LL_Info, "Resize\n");
@@ -998,10 +999,16 @@ namespace SPTAG
             localIndices.resize(realVectorNum);
             smallSample.Initialize(realVectorNum, m_options.m_dim, m_index->m_iDataBlockSize, m_index->m_iDataCapacity, reinterpret_cast<ValueType*>(vectorBuffer.get()), false);
 
+            auto clusterBegin = std::chrono::high_resolution_clock::now();
             // k = 2, maybe we can change the split number, now it is fixed
             SPTAG::COMMON::KmeansArgs<ValueType> args(2, smallSample.C(), (SizeType)localIndicesInsert.size(), 1, m_index->GetDistCalcMethod());
             std::shuffle(localIndices.begin(), localIndices.end(), std::mt19937(std::random_device()()));
+
             int numClusters = SPTAG::COMMON::KmeansClustering(smallSample, localIndices, 0, (SizeType)localIndices.size(), args, 1000, 100.0F, false, nullptr, m_options.m_virtualHead);
+
+            auto clusterEnd = std::chrono::high_resolution_clock::now();
+            double elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(clusterEnd - clusterBegin).count();
+            m_clusteringCost += elapsedMSeconds;
             // int numClusters = ClusteringSPFresh(smallSample, localIndices, 0, localIndices.size(), args, 10, false, m_options.m_virtualHead);
             // exit(0);
             if (numClusters <= 1)
@@ -1066,7 +1073,12 @@ namespace SPTAG
                         LOG(Helper::LogLevel::LL_Info, "Fail to add new postings\n");
                         exit(0);
                     }
+
+                    auto updateHeadBegin = std::chrono::high_resolution_clock::now();
                     m_index->AddIndexIdx(begin, end);
+                    auto updateHeadEnd = std::chrono::high_resolution_clock::now();
+                    elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(updateHeadEnd - updateHeadBegin).count();
+                    m_updateHeadCost += elapsedMSeconds;
                 }
                 newPostingLists.push_back(postingList);
                 // LOG(Helper::LogLevel::LL_Info, "Head id: %d split into : %d, length: %d\n", headID, newHeadVID, args.counts[k]);
@@ -1092,9 +1104,14 @@ namespace SPTAG
 
             // QuantifySplit(headID, newPostingLists, newHeadsID, headID, split_order);
             // QuantifyAssumptionBrokenTotally();
+            auto reassignScanBegin = std::chrono::high_resolution_clock::now();
             
             if (!m_options.m_disableReassign) ReAssign(headID, newPostingLists, newHeadsID);
 
+            auto reassignScanEnd = std::chrono::high_resolution_clock::now();
+            elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(reassignScanEnd - reassignScanBegin).count();
+
+            m_reassignScanCost += elapsedMSeconds;
             
             // while (!ReassignFinished())
             // {
@@ -1221,7 +1238,7 @@ namespace SPTAG
             m_reAssignNum++;
 
             bool isNeedReassign = true;
-
+            auto selectBegin = std::chrono::high_resolution_clock::now();
             COMMON::QueryResultSet<ValueType> p_queryResults(NULL, m_options.m_internalResultNum);
             p_queryResults.SetTarget(reinterpret_cast<ValueType*>(&vectorContain->front()));
             p_queryResults.Reset();
@@ -1261,6 +1278,9 @@ namespace SPTAG
                 }
                 ++replicaCount;
             }
+            auto selectEnd = std::chrono::high_resolution_clock::now();
+            auto elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(selectEnd - selectBegin).count();
+            m_selectCost += elapsedMSeconds;
 
             if (isNeedReassign && CheckVersionValid(VID, version)) {
                 // LOG(Helper::LogLevel::LL_Info, "Update Version: VID: %d, version: %d, current version: %d\n", VID, version, m_versionMap.GetVersion(VID));
@@ -1270,7 +1290,7 @@ namespace SPTAG
             }
 
             //LOG(Helper::LogLevel::LL_Info, "Reassign: oldVID:%d, replicaCount:%d, candidateNum:%d, dist0:%f\n", oldVID, replicaCount, i, selections[0].distance);
-
+            auto reassignAppendBegin = std::chrono::high_resolution_clock::now();
             for (i = 0; isNeedReassign && i < replicaCount && CheckVersionValid(VID, version); i++) {
                 std::string newPart;
                 newPart += Helper::Convert::Serialize<int>(&VID, 1);
@@ -1284,19 +1304,22 @@ namespace SPTAG
                     isNeedReassign = false;
                 }
             }
+            auto reassignAppendEnd = std::chrono::high_resolution_clock::now();
+            elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(reassignAppendEnd - reassignAppendBegin).count();
+            m_reAssignAppendCost += elapsedMSeconds;
+
             return isNeedReassign;
         }
 
         template <typename ValueType>
         ErrorCode SPTAG::SPANN::Index<ValueType>::Append(SizeType headID, int appendNum, std::string& appendPosting)
         {
+            auto appendBegin = std::chrono::high_resolution_clock::now();
             int reassignThreshold = 0;
             if (appendPosting.empty()) {
                 LOG(Helper::LogLevel::LL_Error, "Error! empty append posting!\n");
             }
             int vectorInfoSize = m_options.m_dim * sizeof(ValueType) + m_metaDataSize;
-//            TimeUtils::StopW sw;
-            m_appendTaskNum++;
 
             if (appendNum == 0) {
                 LOG(Helper::LogLevel::LL_Info, "Error!, headID :%d, appendNum:%d\n", headID, appendNum);
@@ -1310,7 +1333,6 @@ namespace SPTAG
             if (!m_index->ContainSample(headID)) {
                 for (int i = 0; i < appendNum; i++)
                 {
-//                  m_currerntReassignTaskNum++;
                     uint32_t idx = i * vectorInfoSize;
                     uint8_t version = *(uint8_t*)(&appendPosting[idx + sizeof(int)]);
                     auto vectorContain = std::make_shared<std::string>(appendPosting.substr(idx + m_metaDataSize, m_options.m_dim * sizeof(ValueType)));
@@ -1327,6 +1349,10 @@ namespace SPTAG
                 if (Split(headID, appendNum, appendPosting) == ErrorCode::FailSplit) {
                     goto checkDeleted;
                 }
+                auto splitEnd = std::chrono::high_resolution_clock::now();
+                double elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(splitEnd - appendBegin).count();
+                m_splitCost += elapsedMSeconds;
+                return ErrorCode::Success;
             } else {
                 {
                     std::shared_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]);
@@ -1341,6 +1367,7 @@ namespace SPTAG
 
                     // }
                     // LOG(Helper::LogLevel::LL_Info, "Merge: headID: %d, appendNum:%d\n", headID, appendNum);
+                    if (!reassignThreshold) m_appendTaskNum++;
                     if (m_extraSearcher->AppendPosting(headID, appendPosting) != ErrorCode::Success) {
                         LOG(Helper::LogLevel::LL_Error, "Merge failed!\n");
                         exit(1);
@@ -1348,6 +1375,9 @@ namespace SPTAG
                     m_postingSizes.IncSize(headID, appendNum);
                 }
             }
+            auto appendEnd = std::chrono::high_resolution_clock::now();
+            double elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(appendEnd - appendBegin).count();
+            m_appendCost += elapsedMSeconds;
             return ErrorCode::Success;
         }
 
@@ -1367,8 +1397,13 @@ namespace SPTAG
             // }
             // tbb::concurrent_hash_map<SizeType, SizeType>::value_type workPair(VID, version);
             // m_reassignMap.insert(workPair);
+            auto reassignBegin = std::chrono::high_resolution_clock::now();
 
-            if (ReAssignUpdate(vectorContain, VID, HeadPrev, version))
+            ReAssignUpdate(vectorContain, VID, HeadPrev, version);
+
+            auto reassignEnd = std::chrono::high_resolution_clock::now();
+            double elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(reassignEnd - reassignBegin).count();
+            m_reAssignCost += elapsedMSeconds;
             //     m_reassignMap.erase(VID);
 
             if (p_callback != nullptr) {

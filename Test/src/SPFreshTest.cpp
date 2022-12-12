@@ -729,6 +729,8 @@ namespace SPTAG {
                     LOG(Helper::LogLevel::LL_Info, "Total Vector num %d \n", curCount);
 
                     p_index->PrintUpdateStatus(finishedInsert);
+                    p_index->PrintUpdateCostStatus();
+                    p_index->ResetUpdateStatus();
 
                     ShowMemoryStatus(vectorSet, sw.getElapsedSec());
                     // p_opts.m_calTruth = calTruthOrigin;

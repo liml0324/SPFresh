@@ -252,12 +252,28 @@ namespace SPTAG
 
             std::atomic_uint32_t m_headMiss{0};
             uint32_t m_appendTaskNum{0};
-            uint32_t m_splitTaskNum{0};
             uint32_t m_splitNum{0};
             uint32_t m_theSameHeadNum{0};
             uint32_t m_reAssignNum{0};
             uint32_t m_garbageNum{0};
             uint64_t m_reAssignScanNum{0};
+
+            //Split
+            double m_splitCost{0};
+            double m_clusteringCost{0};
+            double m_updateHeadCost{0};
+            double m_reassignScanCost{0};
+
+            // Append
+            double m_appendCost{0};
+
+            // reAssign
+            double m_reAssignCost{0};
+            double m_selectCost{0};
+            double m_reAssignAppendCost{0};
+
+            // GC
+            double m_garbageCost{0};
             std::mutex m_dataAddLock;
 
         public:
@@ -411,9 +427,39 @@ namespace SPTAG
                 m_dispatcher->stop();
             }
 
+            void PrintUpdateCostStatus()
+            {
+                LOG(Helper::LogLevel::LL_Info, "AppendTaskNum: %d, TotalCost: %.3lf us, PerCost: %.3lf us\n", m_appendTaskNum, m_appendCost, m_appendCost/m_appendTaskNum);
+                LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, TotalCost: %.3lf ms, PerCost: %.3lf ms\n", m_splitNum, m_splitCost, m_splitCost/m_splitNum);
+                LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, Clustering TotalCost: %.3lf us, PerCost: %.3lf us\n", m_splitNum, m_clusteringCost, m_clusteringCost/m_splitNum);
+                LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, UpdateHead TotalCost: %.3lf ms, PerCost: %.3lf ms\n", m_splitNum, m_updateHeadCost, m_updateHeadCost/m_splitNum);
+                LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, ReassignScan TotalCost: %.3lf ms, PerCost: %.3lf ms\n", m_splitNum, m_reassignScanCost, m_reassignScanCost/m_splitNum);
+                LOG(Helper::LogLevel::LL_Info, "GCNum: %d, TotalCost: %.3lf ms, PerCost: %.3lf ms\n", m_garbageNum, m_garbageCost, m_garbageCost/m_garbageNum);
+            }
+
             void PrintUpdateStatus(int finishedInsert)
             {
                 LOG(Helper::LogLevel::LL_Info, "After %d insertion, head vectors split %d times, head missing %d times, same head %d times, reassign %d times, reassign scan %ld times, garbage collection %d times\n", finishedInsert, getSplitTimes(), getHeadMiss(), getSameHead(), getReassignNum(), getReAssignScanNum(), getGarbageNum());
+            }
+
+            void ResetUpdateStatus()
+            {
+                m_splitNum = 0;
+                m_headMiss = 0;
+                m_theSameHeadNum = 0;
+                m_reAssignNum = 0;
+                m_reAssignScanNum = 0;
+                m_garbageNum = 0;
+                m_appendTaskNum = 0;
+                m_splitCost = 0;
+                m_clusteringCost = 0;
+                m_garbageCost = 0;
+                m_updateHeadCost = 0;
+                m_reassignScanCost = 0;
+                m_appendCost = 0;
+                m_reAssignCost = 0;
+                m_selectCost = 0;
+                m_reAssignAppendCost = 0;
             }
 
             void Rebuild(std::shared_ptr<Helper::VectorSetReader>& p_reader, SizeType upperBound = -1)
