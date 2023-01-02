@@ -612,16 +612,16 @@ namespace SPTAG {
                 static_cast<uint32_t>(step));
 
                 LOG(Helper::LogLevel::LL_Info,"During Update\n");
-                while(!p_index->AllFinishedExceptReassign())
-                {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(20));
-                }
-                double appendSyncingCost = sw.getElapsedSec();
-                LOG(Helper::LogLevel::LL_Info,
-                "Finish syncing append in %.3lf seconds, actuall throughput is %.2lf, insertion count %u.\n",
-                appendSyncingCost,
-                step / appendSyncingCost,
-                static_cast<uint32_t>(step));
+                // while(!p_index->AllFinishedExceptReassign())
+                // {
+                //     std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                // }
+                // double appendSyncingCost = sw.getElapsedSec();
+                // LOG(Helper::LogLevel::LL_Info,
+                // "Finish syncing append in %.3lf seconds, actuall throughput is %.2lf, insertion count %u.\n",
+                // appendSyncingCost,
+                // step / appendSyncingCost,
+                // static_cast<uint32_t>(step));
 
                 while(!p_index->AllFinished())
                 {
@@ -695,7 +695,7 @@ namespace SPTAG {
                 
                 int finishedInsert = 0;
                 int insertThreads = p_opts.m_insertThreadNum;
-                int appendJobs, reassignJobs, dispatcherJobs;
+                int splitJobs, reassignJobs;
 
                 LOG(Helper::LogLevel::LL_Info, "Updating: numThread: %d, step: %d, totalBatch: %d.\n", insertThreads, step, batch);
 
@@ -716,9 +716,9 @@ namespace SPTAG {
                         insert_status = insert_future.wait_for(std::chrono::seconds(3));
                         if (insert_status == std::future_status::timeout) {
                             ShowMemoryStatus(vectorSet, sw.getElapsedSec());
-                            p_index->GetAppendReassignPoolStatus(&appendJobs, &reassignJobs, &dispatcherJobs);
+                            p_index->GetSplitReassignPoolStatus(&splitJobs, &reassignJobs);
                             p_index->PrintUpdateStatus(-1);
-                            LOG(Helper::LogLevel::LL_Info, "remain appendJobs: %d, reassignJobs: %d, dispatcherJobs: %d\n", appendJobs, reassignJobs, dispatcherJobs);
+                            LOG(Helper::LogLevel::LL_Info, "remain splitJobs: %d, reassignJobs: %d\n", splitJobs, reassignJobs);
                             if(p_opts.m_searchDuringUpdate) StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, curCount, p_opts, sw.getElapsedSec());
                             p_index->GetDBStat();
                         }

@@ -168,6 +168,7 @@ namespace SPTAG
             ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex);
 
             ErrorCode Append(SizeType headID, int appendNum, std::string& appendPosting) { return ErrorCode::Undefined; }
+            ErrorCode Split(SizeType headID) { return ErrorCode::Undefined; }
             void ProcessAsyncReassign(std::shared_ptr<std::string> vectorContain, SizeType VID, SizeType HeadPrev, uint8_t version, std::function<void()> p_callback) {}
 
         private:

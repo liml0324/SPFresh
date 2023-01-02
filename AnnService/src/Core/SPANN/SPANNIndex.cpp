@@ -649,16 +649,16 @@ namespace SPTAG
                 m_persistentBuffer = std::make_shared<PersistentBuffer>(m_options.m_persistentBufferPath, db);
                 LOG(Helper::LogLevel::LL_Info, "SPFresh: finish initialization\n");
                 LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize thread pools, append: %d, reassign %d\n", m_options.m_appendThreadNum, m_options.m_reassignThreadNum);
-                m_appendThreadPool = std::make_shared<ThreadPool>();
-                m_appendThreadPool->init(m_options.m_appendThreadNum);
+                m_splitThreadPool = std::make_shared<ThreadPool>();
+                m_splitThreadPool->init(m_options.m_appendThreadNum);
                 m_reassignThreadPool = std::make_shared<ThreadPool>();
                 m_reassignThreadPool->init(m_options.m_reassignThreadNum);
                 LOG(Helper::LogLevel::LL_Info, "SPFresh: finish initialization\n");
 
-                LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize dispatcher\n");
-                m_dispatcher = std::make_shared<Dispatcher>(m_persistentBuffer, m_options.m_batch, m_appendThreadPool, m_reassignThreadPool, this);
+                // LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize dispatcher\n");
+                // m_dispatcher = std::make_shared<Dispatcher>(m_persistentBuffer, m_options.m_batch, m_splitThreadPool, m_reassignThreadPool, this);
 
-                m_dispatcher->run();
+                // m_dispatcher->run();
                 LOG(Helper::LogLevel::LL_Info, "SPFresh: finish initialization\n");
             }
             
@@ -824,20 +824,30 @@ namespace SPTAG
                 char insertCode = 0;
                 uint8_t version = 0;
                 m_versionMap.UpdateVersion(VID, version);
-
-                std::string assignment;
-                assignment += Helper::Convert::Serialize<char>(&insertCode, 1);
-                assignment += Helper::Convert::Serialize<char>(&replicaCount, 1);
+                std::string appendPosting;
+                appendPosting += Helper::Convert::Serialize<int>(&VID, 1);
+                appendPosting += Helper::Convert::Serialize<uint8_t>(&version, 1);
+                appendPosting += Helper::Convert::Serialize<T>(p_queryResults[k].GetTarget(), m_options.m_dim);
+                // std::shared_ptr<std::string> appendPosting_ptr = std::make_shared<std::string>(appendPosting);
                 for (int i = 0; i < replicaCount; i++)
                 {
-                    // LOG(Helper::LogLevel::LL_Info, "VID: %d, HeadID: %d, Write To PersistentBuffer\n", VID, selections[i].headID);
-                    assignment += Helper::Convert::Serialize<int>(&selections[i].headID, 1);
-                    assignment += Helper::Convert::Serialize<int>(&VID, 1);
-                    assignment += Helper::Convert::Serialize<uint8_t>(&version, 1);
-                    // assignment += Helper::Convert::Serialize<float>(&selections[i].distance, 1);
-                    assignment += Helper::Convert::Serialize<T>(p_queryResults[k].GetTarget(), m_options.m_dim);
+                    // AppendAsync(selections[i].headID, 1, appendPosting_ptr);
+                    Append(selections[i].headID, 1, appendPosting);
                 }
-                m_assignmentQueue.push(m_persistentBuffer->PutAssignment(assignment));
+
+                // std::string assignment;
+                // assignment += Helper::Convert::Serialize<char>(&insertCode, 1);
+                // assignment += Helper::Convert::Serialize<char>(&replicaCount, 1);
+                // for (int i = 0; i < replicaCount; i++)
+                // {
+                //     // LOG(Helper::LogLevel::LL_Info, "VID: %d, HeadID: %d, Write To PersistentBuffer\n", VID, selections[i].headID);
+                //     assignment += Helper::Convert::Serialize<int>(&selections[i].headID, 1);
+                //     assignment += Helper::Convert::Serialize<int>(&VID, 1);
+                //     assignment += Helper::Convert::Serialize<uint8_t>(&version, 1);
+                //     // assignment += Helper::Convert::Serialize<float>(&selections[i].distance, 1);
+                //     assignment += Helper::Convert::Serialize<T>(p_queryResults[k].GetTarget(), m_options.m_dim);
+                // }
+                // m_assignmentQueue.push(m_persistentBuffer->PutAssignment(assignment));
             }
             return ErrorCode::Success;
         }
@@ -860,87 +870,92 @@ namespace SPTAG
         void SPTAG::SPANN::Index<T>::Dispatcher::dispatch()
         {
             // int32_t vectorInfoSize = m_index->GetValueSize() + sizeof(int) + sizeof(uint8_t) + sizeof(float);
-            int32_t vectorInfoSize = m_index->GetValueSize() + sizeof(int) + sizeof(uint8_t);
-            while (running) {
+            // int32_t vectorInfoSize = m_index->GetValueSize() + sizeof(int) + sizeof(uint8_t);
+            // while (running) {
 
-                std::map<SizeType, std::shared_ptr<std::string>> newPart;
-                newPart.clear();
-                int i;
-                for (i = 0; i < batch; i++) {
-                    std::string assignment;
-                    int assignId = m_index->GetNextAssignment();
+            //     std::map<SizeType, std::shared_ptr<std::string>> newPart;
+            //     newPart.clear();
+            //     int i;
+            //     for (i = 0; i < batch; i++) {
+            //         std::string assignment;
+            //         int assignId = m_index->GetNextAssignment();
 
-                    if (assignId == -1) break;
+            //         if (assignId == -1) break;
 
-                    m_persistentBuffer->GetAssignment(assignId, &assignment);
-                    if(assignment.empty()) {
-                        LOG(Helper::LogLevel::LL_Info, "Error: Get Assignment\n");
-                        exit(0);
-                    }
-                    char code = *(reinterpret_cast<char*>(assignment.data()));
-                    if (code == 0) {
-                        // insert
-                        char* replicaCount = assignment.data() + sizeof(char);
-                        // LOG(Helper::LogLevel::LL_Info, "dispatch: replica count: %d\n", *replicaCount);
+            //         m_persistentBuffer->GetAssignment(assignId, &assignment);
+            //         if(assignment.empty()) {
+            //             LOG(Helper::LogLevel::LL_Info, "Error: Get Assignment\n");
+            //             exit(0);
+            //         }
+            //         char code = *(reinterpret_cast<char*>(assignment.data()));
+            //         if (code == 0) {
+            //             // insert
+            //             char* replicaCount = assignment.data() + sizeof(char);
+            //             // LOG(Helper::LogLevel::LL_Info, "dispatch: replica count: %d\n", *replicaCount);
 
-                        for (char index = 0; index < *replicaCount; index++) {
-                            char* headPointer = assignment.data() + sizeof(char) + sizeof(char) + index * (vectorInfoSize + sizeof(int));
-                            int32_t headID = *(reinterpret_cast<int*>(headPointer));
-                            // LOG(Helper::LogLevel::LL_Info, "dispatch: headID: %d\n", headID);
-                            int32_t vid = *(reinterpret_cast<int*>(headPointer + sizeof(int)));
-                            // LOG(Helper::LogLevel::LL_Info, "dispatch: vid: %d\n", vid);
-                            uint8_t version = *(reinterpret_cast<uint8_t*>(headPointer + sizeof(int) + sizeof(int)));
-                            // LOG(Helper::LogLevel::LL_Info, "dispatch: version: %d\n", version);
+            //             for (char index = 0; index < *replicaCount; index++) {
+            //                 char* headPointer = assignment.data() + sizeof(char) + sizeof(char) + index * (vectorInfoSize + sizeof(int));
+            //                 int32_t headID = *(reinterpret_cast<int*>(headPointer));
+            //                 // LOG(Helper::LogLevel::LL_Info, "dispatch: headID: %d\n", headID);
+            //                 int32_t vid = *(reinterpret_cast<int*>(headPointer + sizeof(int)));
+            //                 // LOG(Helper::LogLevel::LL_Info, "dispatch: vid: %d\n", vid);
+            //                 uint8_t version = *(reinterpret_cast<uint8_t*>(headPointer + sizeof(int) + sizeof(int)));
+            //                 // LOG(Helper::LogLevel::LL_Info, "dispatch: version: %d\n", version);
 
-                            if (m_index->CheckIdDeleted(vid) || !m_index->CheckVersionValid(vid, version)) {
-                                // LOG(Helper::LogLevel::LL_Info, "Unvalid Vector: %d, version: %d, current version: %d\n", vid, version);
-                                continue;
-                            }
-                            // LOG(Helper::LogLevel::LL_Info, "Vector: %d, Plan to append to: %d\n", vid, headID);
-                            if (newPart.find(headID) == newPart.end()) {
-                                newPart[headID] = std::make_shared<std::string>(assignment.substr(sizeof(char) + sizeof(char) + index * (vectorInfoSize + sizeof(int)) + sizeof(int), vectorInfoSize));
-                            } else {
-                                newPart[headID]->append(assignment.substr(sizeof(char) + sizeof(char) + index * (vectorInfoSize + sizeof(int)) + sizeof(int), vectorInfoSize));
-                            }
-                        }
-                    } else {
-                        // delete
-                        char* vectorPointer = assignment.data() + sizeof(char);
-                        int VID = *(reinterpret_cast<int*>(vectorPointer));
-                        //LOG(Helper::LogLevel::LL_Info, "Scanner: delete: %d\n", VID);
-                        m_index->DeleteIndex(VID);
-                    }
-                }
+            //                 if (m_index->CheckIdDeleted(vid) || !m_index->CheckVersionValid(vid, version)) {
+            //                     // LOG(Helper::LogLevel::LL_Info, "Unvalid Vector: %d, version: %d, current version: %d\n", vid, version);
+            //                     continue;
+            //                 }
+            //                 // LOG(Helper::LogLevel::LL_Info, "Vector: %d, Plan to append to: %d\n", vid, headID);
+            //                 if (newPart.find(headID) == newPart.end()) {
+            //                     newPart[headID] = std::make_shared<std::string>(assignment.substr(sizeof(char) + sizeof(char) + index * (vectorInfoSize + sizeof(int)) + sizeof(int), vectorInfoSize));
+            //                 } else {
+            //                     newPart[headID]->append(assignment.substr(sizeof(char) + sizeof(char) + index * (vectorInfoSize + sizeof(int)) + sizeof(int), vectorInfoSize));
+            //                 }
+            //             }
+            //         } else {
+            //             // delete
+            //             char* vectorPointer = assignment.data() + sizeof(char);
+            //             int VID = *(reinterpret_cast<int*>(vectorPointer));
+            //             //LOG(Helper::LogLevel::LL_Info, "Scanner: delete: %d\n", VID);
+            //             m_index->DeleteIndex(VID);
+            //         }
+            //     }
 
-                for (auto & iter : newPart) {
-                    int appendNum = (*iter.second).size() / (vectorInfoSize);
-                    if (appendNum == 0) LOG(Helper::LogLevel::LL_Info, "Error!, headID :%d, appendNum :%d, size :%d\n", iter.first, appendNum, iter.second);
-                    m_index->AppendAsync(iter.first, appendNum, iter.second);
-                }
+            //     for (auto & iter : newPart) {
+            //         int appendNum = (*iter.second).size() / (vectorInfoSize);
+            //         if (appendNum == 0) LOG(Helper::LogLevel::LL_Info, "Error!, headID :%d, appendNum :%d, size :%d\n", iter.first, appendNum, iter.second);
+            //         m_index->AppendAsync(iter.first, appendNum, iter.second);
+            //     }
 
-                if (i == 0) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                } else {
-                    // LOG(Helper::LogLevel::LL_Info, "Dispatcher: Process Append Assignments: %d, after batched: %d\n", i, newPart.size());
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                }
-            }
+            //     if (i == 0) {
+            //         std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            //     } else {
+            //         // LOG(Helper::LogLevel::LL_Info, "Dispatcher: Process Append Assignments: %d, after batched: %d\n", i, newPart.size());
+            //         std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            //     }
+            // }
         }
 
+        // template <typename ValueType>
+        // ErrorCode SPTAG::SPANN::Index<ValueType>::Split(const SizeType headID, int appendNum, std::string& appendPosting)
         template <typename ValueType>
-        ErrorCode SPTAG::SPANN::Index<ValueType>::Split(const SizeType headID, int appendNum, std::string& appendPosting)
+        ErrorCode SPTAG::SPANN::Index<ValueType>::Split(const SizeType headID)
         {
             auto splitBegin = std::chrono::high_resolution_clock::now();
             std::unique_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]);
-            if (m_postingSizes.GetSize(headID) + appendNum < m_extraSearcher->GetPostingSizeLimit()) {
-                return ErrorCode::FailSplit;
+            // if (m_postingSizes.GetSize(headID) + appendNum < m_extraSearcher->GetPostingSizeLimit()) {
+            //     return ErrorCode::FailSplit;
+            // }
+            if (m_postingSizes.GetSize(headID) < m_extraSearcher->GetPostingSizeLimit()) {
+                   return ErrorCode::FailSplit;    
             }
             std::string postingList;
             if (m_extraSearcher->SearchIndex(headID, postingList) != ErrorCode::Success) {
                 LOG(Helper::LogLevel::LL_Info, "Split fail to get oversized postings\n");
                 exit(0);
             }
-            postingList += appendPosting;
+            // postingList += appendPosting;
             // reinterpret postingList to vectors and IDs
             auto* postingP = reinterpret_cast<uint8_t*>(&postingList.front());
             size_t vectorInfoSize = m_options.m_dim * sizeof(ValueType) + m_metaDataSize;
@@ -1122,6 +1137,9 @@ namespace SPTAG
             // LOG(Helper::LogLevel::LL_Info, "After ReAssign\n");
 
             // QuantifySplit(headID, newPostingLists, newHeadsID, headID, split_order);
+            auto splitEnd = std::chrono::high_resolution_clock::now();
+            elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(splitEnd - splitBegin).count();
+            m_splitCost += elapsedMSeconds;
             return ErrorCode::Success;
         }
 
@@ -1349,40 +1367,43 @@ namespace SPTAG
                 }
                 return ErrorCode::Undefined;
             }
-            if (m_postingSizes.GetSize(headID) + appendNum > (m_extraSearcher->GetPostingSizeLimit() + reassignThreshold)) {
-                if (Split(headID, appendNum, appendPosting) == ErrorCode::FailSplit) {
+            // if (m_postingSizes.GetSize(headID) + appendNum > (m_extraSearcher->GetPostingSizeLimit() + reassignThreshold)) {
+            //     if (Split(headID, appendNum, appendPosting) == ErrorCode::FailSplit) {
+            //         goto checkDeleted;
+            //     }
+            //     auto splitEnd = std::chrono::high_resolution_clock::now();
+            //     double elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(splitEnd - appendBegin).count();
+            //     m_splitCost += elapsedMSeconds;
+            //     return ErrorCode::Success;
+            // } else {
+            {
+                std::shared_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]);
+                if (!m_index->ContainSample(headID)) {
                     goto checkDeleted;
                 }
-                auto splitEnd = std::chrono::high_resolution_clock::now();
-                double elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(splitEnd - appendBegin).count();
-                m_splitCost += elapsedMSeconds;
-                return ErrorCode::Success;
-            } else {
-                {
-                    std::shared_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]);
-                    if (!m_index->ContainSample(headID)) {
-                        goto checkDeleted;
-                    }
-                    // for (int i = 0; i < appendNum; i++)
-                    // {
-                    //     uint32_t idx = i * vectorInfoSize;
-                    //     uint8_t version = *(uint8_t*)(&appendPosting[idx + sizeof(int)]);
-                    //     LOG(Helper::LogLevel::LL_Info, "Append: VID: %d, current version: %d\n", *(int*)(&appendPosting[idx]), version);
+                // for (int i = 0; i < appendNum; i++)
+                // {
+                //     uint32_t idx = i * vectorInfoSize;
+                //     uint8_t version = *(uint8_t*)(&appendPosting[idx + sizeof(int)]);
+                //     LOG(Helper::LogLevel::LL_Info, "Append: VID: %d, current version: %d\n", *(int*)(&appendPosting[idx]), version);
 
-                    // }
-                    // LOG(Helper::LogLevel::LL_Info, "Merge: headID: %d, appendNum:%d\n", headID, appendNum);
-                    if (!reassignThreshold) m_appendTaskNum++;
-                    auto appendIOBegin = std::chrono::high_resolution_clock::now();
-                    if (m_extraSearcher->AppendPosting(headID, appendPosting) != ErrorCode::Success) {
-                        LOG(Helper::LogLevel::LL_Error, "Merge failed!\n");
-                        exit(1);
-                    }
-                    auto appendIOEnd = std::chrono::high_resolution_clock::now();
-                    double elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(appendIOEnd - appendIOBegin).count();
-                    if (!reassignThreshold) m_appendIOCost += elapsedMSeconds;
-                    m_postingSizes.IncSize(headID, appendNum);
+                // }
+                // LOG(Helper::LogLevel::LL_Info, "Merge: headID: %d, appendNum:%d\n", headID, appendNum);
+                if (!reassignThreshold) m_appendTaskNum++;
+                auto appendIOBegin = std::chrono::high_resolution_clock::now();
+                if (m_extraSearcher->AppendPosting(headID, appendPosting) != ErrorCode::Success) {
+                    LOG(Helper::LogLevel::LL_Error, "Merge failed!\n");
+                    exit(1);
                 }
+                auto appendIOEnd = std::chrono::high_resolution_clock::now();
+                double elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(appendIOEnd - appendIOBegin).count();
+                if (!reassignThreshold) m_appendIOCost += elapsedMSeconds;
+                m_postingSizes.IncSize(headID, appendNum);
             }
+            if (m_postingSizes.GetSize(headID) + appendNum > (m_extraSearcher->GetPostingSizeLimit() + reassignThreshold)) {
+                SplitAsync(headID);
+            }
+            // }
             auto appendEnd = std::chrono::high_resolution_clock::now();
             double elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(appendEnd - appendBegin).count();
             if (!reassignThreshold) m_appendCost += elapsedMSeconds;

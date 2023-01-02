@@ -46,22 +46,42 @@ namespace SPTAG
         template<typename T>
     class Index : public VectorIndex
     {
-            class AppendAsyncJob : public Helper::ThreadPool::Job
+            // class AppendAsyncJob : public Helper::ThreadPool::Job
+            // {
+            // private:
+            //     VectorIndex* m_index;
+            //     SizeType headID;
+            //     int appendNum;
+            //     std::shared_ptr<std::string> appendPosting;
+            //     std::function<void()> m_callback;
+            // public:
+            //     AppendAsyncJob(VectorIndex* m_index, SizeType headID, int appendNum, std::shared_ptr<std::string> appendPosting, std::function<void()> p_callback)
+            //             : m_index(m_index), headID(headID), appendNum(appendNum), appendPosting(std::move(appendPosting)), m_callback(std::move(p_callback)) {}
+
+            //     ~AppendAsyncJob() {}
+
+            //     inline void exec(IAbortOperation* p_abort) override {
+            //         m_index->Append(headID, appendNum, *appendPosting);
+            //         if (m_callback != nullptr) {
+            //             m_callback();
+            //         }
+            //     }
+            // };
+
+            class SplitAsyncJob : public Helper::ThreadPool::Job
             {
             private:
                 VectorIndex* m_index;
                 SizeType headID;
-                int appendNum;
-                std::shared_ptr<std::string> appendPosting;
                 std::function<void()> m_callback;
             public:
-                AppendAsyncJob(VectorIndex* m_index, SizeType headID, int appendNum, std::shared_ptr<std::string> appendPosting, std::function<void()> p_callback)
-                        : m_index(m_index), headID(headID), appendNum(appendNum), appendPosting(std::move(appendPosting)), m_callback(std::move(p_callback)) {}
+                SplitAsyncJob(VectorIndex* m_index, SizeType headID, std::function<void()> p_callback)
+                        : m_index(m_index), headID(headID), m_callback(std::move(p_callback)) {}
 
-                ~AppendAsyncJob() {}
+                ~SplitAsyncJob() {}
 
                 inline void exec(IAbortOperation* p_abort) override {
-                    m_index->Append(headID, appendNum, *appendPosting);
+                    m_index->Split(headID);
                     if (m_callback != nullptr) {
                         m_callback();
                     }
@@ -241,7 +261,7 @@ namespace SPTAG
             std::shared_ptr<Dispatcher> m_dispatcher;
             std::shared_ptr<PersistentBuffer> m_persistentBuffer;
             std::shared_ptr<Helper::ThreadPool> m_threadPool;
-            std::shared_ptr<ThreadPool> m_appendThreadPool;
+            std::shared_ptr<ThreadPool> m_splitThreadPool;
             std::shared_ptr<ThreadPool> m_reassignThreadPool;
 
             COMMON::VersionLabel m_versionMap;
@@ -377,16 +397,21 @@ namespace SPTAG
             ErrorCode BuildIndexInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader);
 
             ErrorCode Append(SizeType headID, int appendNum, std::string& appendPosting);
-            ErrorCode Split(const SizeType headID, int appendNum, std::string& appendPosting);
+            ErrorCode Split(const SizeType headID);
             ErrorCode ReAssign(SizeType headID, std::vector<std::string>& postingLists, std::vector<SizeType>& newHeadsID);
             void ReAssignVectors(std::map<SizeType, T*>& reAssignVectors, std::map<SizeType, SizeType>& HeadPrevs, std::map<SizeType, uint8_t>& versions);
             bool ReAssignUpdate(const std::shared_ptr<std::string>&, SizeType VID, SizeType HeadPrev, uint8_t version);
 
         public:
-            inline void AppendAsync(SizeType headID, int appendNum, std::shared_ptr<std::string> appendPosting, std::function<void()> p_callback=nullptr)
+            // inline void AppendAsync(SizeType headID, int appendNum, std::shared_ptr<std::string> appendPosting, std::function<void()> p_callback=nullptr)
+            // {
+            //     auto* curJob = new AppendAsyncJob(this, headID, appendNum, std::move(appendPosting), p_callback);
+            //     m_splitThreadPool->add(curJob);
+            // }
+            inline void SplitAsync(SizeType headID, std::function<void()> p_callback=nullptr)
             {
-                auto* curJob = new AppendAsyncJob(this, headID, appendNum, std::move(appendPosting), p_callback);
-                m_appendThreadPool->add(curJob);
+                auto* curJob = new SplitAsyncJob(this, headID, p_callback);
+                m_splitThreadPool->add(curJob);
             }
 
             inline void ReassignAsync(std::shared_ptr<std::string> vectorContain, SizeType VID, SizeType HeadPrev, uint8_t version, std::function<void()> p_callback=nullptr)
@@ -397,11 +422,12 @@ namespace SPTAG
 
             void ProcessAsyncReassign(std::shared_ptr<std::string> vectorContain, SizeType VID, SizeType HeadPrev, uint8_t version, std::function<void()> p_callback);
 
-            bool AllFinished() {return m_dispatcher->allFinished() && m_assignmentQueue.empty();}
+            // bool AllFinished() {return m_dispatcher->allFinished() && m_assignmentQueue.empty();}
+            bool AllFinished() {return m_splitThreadPool->allClear() && m_reassignThreadPool->allClear();}
 
-            bool AllFinishedExceptReassign() {return m_dispatcher->allFinishedExceptReassign() && m_assignmentQueue.empty();}
+            // bool AllFinishedExceptReassign() {return m_dispatcher->allFinishedExceptReassign() && m_assignmentQueue.empty();}
 
-            bool ReassignFinished() {return m_dispatcher->reassignFinished();}
+            bool ReassignFinished() {return m_reassignThreadPool->allClear();}
 
             void ForceCompaction() {if (m_options.m_useKV) m_extraSearcher->ForceCompaction();}
 
@@ -417,10 +443,10 @@ namespace SPTAG
 
             unsigned long getReAssignScanNum() {return m_reAssignScanNum;}
 
-            void GetAppendReassignPoolStatus(int* appendJobs, int* reassignJobs, int* dispatcherJobs) 
+            void GetSplitReassignPoolStatus(int* splitJobs, int* reassignJobs) 
             {
-                m_dispatcher->GetStatus(appendJobs, reassignJobs);
-                *dispatcherJobs = m_assignmentQueue.unsafe_size();
+                *splitJobs = m_splitThreadPool->jobsize();
+                *reassignJobs = m_reassignThreadPool->jobsize();
             }
 
             void UpdateStop()
@@ -433,7 +459,7 @@ namespace SPTAG
             {
                 LOG(Helper::LogLevel::LL_Info, "AppendTaskNum: %d, TotalCost: %.3lf us, PerCost: %.3lf us\n", m_appendTaskNum, m_appendCost, m_appendCost/m_appendTaskNum);
                 LOG(Helper::LogLevel::LL_Info, "AppendTaskNum: %d, AppendIO TotalCost: %.3lf us, PerCost: %.3lf us\n", m_appendTaskNum, m_appendIOCost, m_appendIOCost/m_appendTaskNum);
-                LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, TotalCost: %.3lf ms, PerCost: %.3lf ms\n", m_splitNum, m_splitCost - m_garbageCost/1000, (m_splitCost - m_garbageCost/1000)/m_splitNum);
+                LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, TotalCost: %.3lf ms, PerCost: %.3lf ms\n", m_splitNum, m_splitCost, m_splitCost/m_splitNum);
                 LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, Clustering TotalCost: %.3lf us, PerCost: %.3lf us\n", m_splitNum, m_clusteringCost, m_clusteringCost/m_splitNum);
                 LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, UpdateHead TotalCost: %.3lf ms, PerCost: %.3lf ms\n", m_splitNum, m_updateHeadCost, m_updateHeadCost/m_splitNum);
                 LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, ReassignScan TotalCost: %.3lf ms, PerCost: %.3lf ms\n", m_splitNum, m_reassignScanCost, m_reassignScanCost/m_splitNum);
