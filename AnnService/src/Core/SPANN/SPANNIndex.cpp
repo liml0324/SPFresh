@@ -1301,7 +1301,7 @@ namespace SPTAG
                 ++replicaCount;
             }
             auto selectEnd = std::chrono::high_resolution_clock::now();
-            auto elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(selectEnd - selectBegin).count();
+            auto elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(selectEnd - selectBegin).count();
             m_selectCost += elapsedMSeconds;
 
             if (isNeedReassign && CheckVersionValid(VID, version)) {
@@ -1327,7 +1327,7 @@ namespace SPTAG
                 }
             }
             auto reassignAppendEnd = std::chrono::high_resolution_clock::now();
-            elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(reassignAppendEnd - reassignAppendBegin).count();
+            elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(reassignAppendEnd - reassignAppendBegin).count();
             m_reAssignAppendCost += elapsedMSeconds;
 
             return isNeedReassign;
@@ -1431,7 +1431,7 @@ namespace SPTAG
             ReAssignUpdate(vectorContain, VID, HeadPrev, version);
 
             auto reassignEnd = std::chrono::high_resolution_clock::now();
-            double elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(reassignEnd - reassignBegin).count();
+            double elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(reassignEnd - reassignBegin).count();
             m_reAssignCost += elapsedMSeconds;
             //     m_reassignMap.erase(VID);
 

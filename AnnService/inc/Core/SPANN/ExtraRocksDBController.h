@@ -65,7 +65,7 @@ namespace SPTAG::SPANN
                 dbOptions.num_levels = 4;
                 dbOptions.level0_file_num_compaction_trigger = 1;
                 dbOptions.level_compaction_dynamic_level_bytes = false;
-                dbOptions.write_buffer_size = 64UL * 1024 * 1024;
+                dbOptions.write_buffer_size = 16UL * 1024 * 1024;
 
                 // rate limiter options
                 // dbOptions.rate_limiter.reset(rocksdb::NewGenericRateLimiter(100UL << 20));
@@ -76,6 +76,9 @@ namespace SPTAG::SPANN
                 dbOptions.blob_file_size = 8UL << 30;
                 dbOptions.blob_compression_type = rocksdb::CompressionType::kNoCompression;
                 dbOptions.enable_blob_garbage_collection = true;
+                dbOptions.compaction_pri = rocksdb::CompactionPri::kRoundRobin;
+                dbOptions.blob_garbage_collection_age_cutoff = 0.02;
+                // dbOptions.blob_garbage_collection_force_threshold = 0.5;
                 // dbOptions.blob_cache = rocksdb::NewLRUCache(5UL << 30);
                 // dbOptions.prepopulate_blob_cache = rocksdb::PrepopulateBlobCache::kFlushOnly;
 
@@ -90,12 +93,12 @@ namespace SPTAG::SPANN
                 // block cache options
                 rocksdb::BlockBasedTableOptions table_options;
                 // table_options.block_cache = rocksdb::NewSimCache(rocksdb::NewLRUCache(1UL << 30), (8UL << 30), -1);
-                table_options.block_cache = rocksdb::NewLRUCache(32UL << 30);
+                table_options.block_cache = rocksdb::NewLRUCache(3UL << 30);
                 // table_options.no_block_cache = true;
 
                 // filter options
-                // table_options.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10, true));
-                // table_options.optimize_filters_for_memory = true;
+                table_options.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10, true));
+                table_options.optimize_filters_for_memory = true;
 
                 dbOptions.table_factory.reset(rocksdb::NewBlockBasedTableFactory(table_options));
             }
