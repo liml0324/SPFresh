@@ -642,7 +642,10 @@ namespace SPTAG
                 }
             }
             
+            int m_inMemoryThread = m_options.m_searchThreadNum;
+
             if (m_options.m_update) {
+                m_inMemoryThread += m_options.m_reassignThreadNum;
                 LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize persistent buffer\n");
                 std::shared_ptr<Helper::KeyValueIO> db;
                 db.reset(new SPANN::RocksDBIO());
@@ -673,8 +676,13 @@ namespace SPTAG
                 }
             }
 
+            m_index->SetParameter("NumberOfThreads", std::to_string(m_inMemoryThread));
+            m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
+            m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
+            m_index->UpdateIndex();
+
             m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
-            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, min(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
+            m_workSpacePool->Init(m_options.m_searchThreadNum, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, min(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
             m_bReady = true;
             return ErrorCode::Success;
         }
