@@ -922,6 +922,7 @@ namespace SPTAG
 
             void CalculatePostingDistribution()
             {
+                if (m_options.m_inPlace) return;
                 int top = m_extraSearcher->GetPostingSizeLimit() / 10 + 1;
                 int page = m_options.m_postingPageLimit + 1;
                 std::vector<int> lengthDistribution(top, 0);
