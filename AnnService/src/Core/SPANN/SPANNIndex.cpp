@@ -646,6 +646,7 @@ namespace SPTAG
 
             if (m_options.m_update) {
                 m_inMemoryThread += m_options.m_reassignThreadNum;
+                m_inMemoryThread += m_options.m_insertThreadNum;
                 LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize persistent buffer\n");
                 std::shared_ptr<Helper::KeyValueIO> db;
                 db.reset(new SPANN::RocksDBIO());

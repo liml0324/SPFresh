@@ -417,7 +417,7 @@ namespace SPTAG
             inline void ReassignAsync(std::shared_ptr<std::string> vectorContain, SizeType VID, SizeType HeadPrev, uint8_t version, std::function<void()> p_callback=nullptr)
             {   
                 auto* curJob = new ReassignAsyncJob(this, std::move(vectorContain), VID, HeadPrev, version, p_callback);
-                m_reassignThreadPool->add(curJob);
+                m_splitThreadPool->add(curJob);
             }
 
             void ProcessAsyncReassign(std::shared_ptr<std::string> vectorContain, SizeType VID, SizeType HeadPrev, uint8_t version, std::function<void()> p_callback);
