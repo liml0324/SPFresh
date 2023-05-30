@@ -79,21 +79,21 @@ namespace SPTAG::SPANN
                 // dbOptions.statistics = rocksdb::CreateDBStatistics();
 
                 // SST file size options
-                dbOptions.target_file_size_base = 128UL * 1024 * 1024;
+                dbOptions.target_file_size_base = 1024UL * 1024 * 1024;
                 dbOptions.target_file_size_multiplier = 2;
                 dbOptions.max_bytes_for_level_base = 16 * 1024UL * 1024 * 1024;
                 dbOptions.max_bytes_for_level_multiplier = 4;
                 dbOptions.max_subcompactions = 16;
                 dbOptions.num_levels = 4;
-                dbOptions.level0_file_num_compaction_trigger = 1;
+                dbOptions.level0_file_num_compaction_trigger = 4;
                 dbOptions.level_compaction_dynamic_level_bytes = false;
-                dbOptions.write_buffer_size = 16UL * 1024 * 1024;
+                dbOptions.write_buffer_size = 1024UL * 1024 * 1024;
 
                 // rate limiter options
                 // dbOptions.rate_limiter.reset(rocksdb::NewGenericRateLimiter(100UL << 20));
 
                 // blob options
-                dbOptions.enable_blob_files = true;
+                dbOptions.enable_blob_files = false;
                 dbOptions.min_blob_size = 64;
                 dbOptions.blob_file_size = 8UL << 30;
                 dbOptions.blob_compression_type = rocksdb::CompressionType::kNoCompression;

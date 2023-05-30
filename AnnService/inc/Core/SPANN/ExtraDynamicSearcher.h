@@ -1549,7 +1549,7 @@ namespace SPTAG::SPANN {
         }
 
         bool AllFinished() { return m_splitThreadPool->allClear() && m_reassignThreadPool->allClear(); }
-        void ForceCompaction() override { db->ForceCompaction(); }
+        void ForceCompaction() override { db->ForceCompaction(); m_postingSizes.Save(m_opt->m_ssdInfoFile);}
         void GetDBStats() override { 
             db->GetStat();
             LOG(Helper::LogLevel::LL_Info, "remain splitJobs: %d, reassignJobs: %d, running split: %d, running reassign: %d\n", m_splitThreadPool->jobsize(), m_reassignThreadPool->jobsize(), m_splitThreadPool->runningJobs(), m_reassignThreadPool->runningJobs());
@@ -1572,6 +1572,13 @@ namespace SPTAG::SPANN {
         void GetWritePosting(SizeType pid, std::string& posting, bool write = false) override { 
             if (write) {
                 db->Put(pid, posting);
+                int delta = pid + 1 - m_postingSizes.GetPostingNum();
+                if (delta > 0) {
+                    {
+                        std::lock_guard<std::mutex> lock(m_dataAddLock);
+                        m_postingSizes.AddBatch(delta);
+                    }
+                }
                 m_postingSizes.UpdateSize(pid, posting.size() / m_vectorInfoSize);
                 // LOG(Helper::LogLevel::LL_Info, "PostingSize: %d\n", m_postingSizes.GetSize(pid));
                 // exit(1);

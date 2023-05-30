@@ -175,6 +175,13 @@ namespace SPTAG {
             int m_spdkBatchSize;
             bool m_stressTest;
 
+            //DSPANN
+            bool m_dspann;
+            int m_dspannIndexFileNum;
+            std::string m_dspannIndexFolderPrefix;
+            std::string m_dspannIndexStoreFolder;
+            std::string m_dspannIndexLabelPrefix;
+
 
             Options() {
 #define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) \

@@ -192,4 +192,11 @@ DefineSSDParameter(m_disableReassign, bool, false, "DisableReassign")
 DefineSSDParameter(m_searchDuringUpdate, bool, false, "SearchDuringUpdate")
 DefineSSDParameter(m_reassignK, int, 0, "ReassignK")
 DefineSSDParameter(m_virtualHead, bool, false, "VirtualHead")
+
+// DSPANN
+DefineSSDParameter(m_dspann, bool, false, "DSPANN")
+DefineSSDParameter(m_dspannIndexFileNum, int, 5, "DSPANNIndexFileNum")
+DefineSSDParameter(m_dspannIndexFolderPrefix, std::string, "", "DSPANNIndexFolderPrefix")
+DefineSSDParameter(m_dspannIndexStoreFolder, std::string, "", "DSPANNIndexStoreFolder")
+DefineSSDParameter(m_dspannIndexLabelPrefix, std::string, "", "DSPANNIndexLabelPrefix")
 #endif

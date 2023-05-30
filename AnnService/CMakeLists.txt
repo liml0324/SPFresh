@@ -116,12 +116,18 @@ file(GLOB_RECURSE SSD_SERVING_FILES ${AnnService}/src/SSDServing/*.cpp)
 file(GLOB_RECURSE SPFRESH_HDR_FILES ${AnnService}/inc/SPFresh/*.h)
 file(GLOB_RECURSE SPFRESH_FILES ${AnnService}/src/SPFresh/*.cpp)
 
+file(GLOB_RECURSE DSPANN_HDR_FILES ${AnnService}/inc/DSPANN/*.h)
+file(GLOB_RECURSE DSPANN_FILES ${AnnService}/src/DSPANN/*.cpp)
+
 add_executable(ssdserving ${SSD_SERVING_HDR_FILES} ${SSD_SERVING_FILES})
 add_executable(spfresh ${SPFRESH_HDR_FILES} ${SPFRESH_FILES})
+add_executable(dspann ${DSPANN_HDR_FILES} ${DSPANN_FILES})
 target_link_libraries(ssdserving SPTAGLibStatic ${Boost_LIBRARIES} ${RocksDB_LIBRARIES})
 target_link_libraries(spfresh SPTAGLibStatic ${Boost_LIBRARIES} ${RocksDB_LIBRARIES})
+target_link_libraries(dspann SPTAGLibStatic ${Boost_LIBRARIES} ${RocksDB_LIBRARIES})
 target_compile_definitions(ssdserving PRIVATE _exe)
 target_compile_definitions(spfresh PRIVATE _exe)
+target_compile_definitions(dspann PRIVATE _exe)
 
 # for Test
 add_library(ssdservingLib ${SSD_SERVING_HDR_FILES} ${SSD_SERVING_FILES})

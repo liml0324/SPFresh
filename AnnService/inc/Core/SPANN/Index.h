@@ -23,6 +23,8 @@
 #include "inc/Core/Common/IQuantizer.h"
 
 #include "IExtraSearcher.h"
+#include "ExtraStaticSearcher.h"
+#include "ExtraDynamicSearcher.h"
 #include "Options.h"
 
 #include <functional>
@@ -219,6 +221,113 @@ namespace SPTAG
                 }
 
                 return m_extraSearcher->AddIndex(vectorSet, m_index, begin);
+            }
+
+            void MergeMultiIndex() {
+                if(!m_options.m_dspann) {
+                    LOG(Helper::LogLevel::LL_Error, "Not Distributed SPANN\n");
+                    exit(1);
+                }
+                LOG(Helper::LogLevel::LL_Info, "Loading the first SPANN Index\n");
+                LoadIndex(m_options.m_dspannIndexFolderPrefix + "_0" + FolderSep + m_options.m_headIndexFolder, m_index);
+                if (m_options.m_useKV)
+                {
+                    m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_KVPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit * PageSize / (sizeof(T)*m_options.m_dim + sizeof(int) + sizeof(uint8_t)), m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold));
+                } else {
+                    LOG(Helper::LogLevel::LL_Error, "Distributed SPANN currently only support RocksDB\n");
+                    exit(1);
+                }
+                std::shared_ptr<IExtraSearcher> storeExtraSearcher;
+                storeExtraSearcher.reset(new ExtraStaticSearcher<T>());
+                m_options.m_indexDirectory = m_options.m_dspannIndexFolderPrefix + "_0";
+                if (!storeExtraSearcher->LoadIndex(m_options, m_versionMap)) {
+                    LOG(Helper::LogLevel::LL_Info, "Initialize Error\n");
+                    exit(1);
+                }
+                m_extraSearcher->LoadIndex(m_options, m_versionMap);
+                LOG(Helper::LogLevel::LL_Info, "Initialize version map & PostingRecord\n");
+                m_versionMap.Initialize(m_options.m_vectorSize, m_index->m_iDataBlockSize, m_index->m_iDataCapacity);
+                m_extraSearcher->InitPostingRecord(m_index);
+                std::string filenameFirst = m_options.m_dspannIndexLabelPrefix + "0";
+                SPTAG::COMMON::Dataset<int> mappingDataFirst;
+                LOG(Helper::LogLevel::LL_Info, "Load From %s\n", filenameFirst.c_str());
+                auto ptr = f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(filenameFirst.c_str(), std::ios::binary | std::ios::in)) {
+                    LOG(Helper::LogLevel::LL_Info, "Initialize Mapping Error: 0\n");
+                    exit(1);
+                }
+                mappingDataFirst.Load(ptr, m_index->m_iDataBlockSize, m_index->m_iDataCapacity);
+                LOG(Helper::LogLevel::LL_Info, "Writing the first index postings\n");
+                int m_vectorInfoSize = sizeof(T) * m_options.m_dim + sizeof(int) + sizeof(uint8_t);
+                #pragma omp parallel for num_threads(m_options.m_iSSDNumberOfThreads) schedule(dynamic,128)
+                for (int index = 0; index < m_index->GetNumSamples(); index++) {
+                    std::string tempPosting;
+                    storeExtraSearcher->GetWritePosting(index, tempPosting);
+
+                    int vectorNum = (int)(tempPosting.size() / (m_vectorInfoSize - sizeof(uint8_t)));
+
+                    auto* postingP = reinterpret_cast<char*>(&tempPosting.front());
+                    std::string newPosting(m_vectorInfoSize * vectorNum , '\0');
+                    char* ptr = (char*)(newPosting.c_str());
+                    for (int j = 0; j < vectorNum; ++j, ptr += m_vectorInfoSize) {
+                        char* vectorInfo = postingP + j * (m_vectorInfoSize - sizeof(uint8_t));
+                        int VID = *mappingDataFirst[*(reinterpret_cast<int*>(vectorInfo))];
+                        uint8_t version = m_versionMap.GetVersion(VID);
+                        memcpy(ptr, &VID, sizeof(int));
+                        memcpy(ptr + sizeof(int), &version, sizeof(uint8_t));
+                        memcpy(ptr + sizeof(int) + sizeof(uint8_t), vectorInfo + sizeof(int), m_vectorInfoSize - sizeof(uint8_t) - sizeof(int));
+                    }
+
+                    m_extraSearcher->GetWritePosting(index, newPosting, true);
+                }
+                for (int i = 1; i < m_options.m_dspannIndexFileNum; i++) {
+                    LOG(Helper::LogLevel::LL_Info, "Writing the %d index postings\n", i);
+                    std::string filename = m_options.m_dspannIndexLabelPrefix + std::to_string(i);
+                    SPTAG::COMMON::Dataset<int> mappingData;
+                    LOG(Helper::LogLevel::LL_Info, "Load From %s\n", filename.c_str());
+                    auto ptr = f_createIO();
+                    if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::in)) {
+                        LOG(Helper::LogLevel::LL_Info, "Initialize Mapping Error: %d\n", i);
+                        exit(1);
+                    }
+                    mappingData.Load(ptr, m_index->m_iDataBlockSize, m_index->m_iDataCapacity);
+                    storeExtraSearcher.reset(new ExtraStaticSearcher<T>());
+                    m_options.m_indexDirectory = m_options.m_dspannIndexFolderPrefix + "_" + std::to_string(i);
+                    if (!storeExtraSearcher->LoadIndex(m_options, m_versionMap)) {
+                        LOG(Helper::LogLevel::LL_Info, "Initialize Error: %d\n", i);
+                        exit(1);
+                    }
+                    std::shared_ptr<VectorIndex> m_mergedIndex;
+                    LoadIndex(m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder, m_mergedIndex);
+                    LOG(Helper::LogLevel::LL_Info, "Merging the %d index postings\n", i);
+                    #pragma omp parallel for num_threads(m_options.m_iSSDNumberOfThreads) schedule(dynamic,128)
+                    for (SizeType index = 0; index < m_mergedIndex->GetNumSamples(); index++) {
+                        int begin, end = 0;
+                        std::string tempPosting;
+                        m_index->AddIndexId(m_mergedIndex->GetSample(index), 1, m_mergedIndex->GetFeatureDim(), begin, end);
+                        m_index->AddIndexIdx(begin, end);
+                        storeExtraSearcher->GetWritePosting(index, tempPosting);
+
+                        int vectorNum = (int)(tempPosting.size() / (m_vectorInfoSize - sizeof(uint8_t)));
+
+                        auto* postingP = reinterpret_cast<char*>(&tempPosting.front());
+                        std::string newPosting(m_vectorInfoSize * vectorNum , '\0');
+                        char* ptr = (char*)(newPosting.c_str());
+                        for (int j = 0; j < vectorNum; ++j, ptr += m_vectorInfoSize) {
+                            char* vectorInfo = postingP + j * (m_vectorInfoSize - sizeof(uint8_t));
+                            int VID = *mappingData[*(reinterpret_cast<int*>(vectorInfo))];
+                            uint8_t version = m_versionMap.GetVersion(VID);
+                            memcpy(ptr, &VID, sizeof(int));
+                            memcpy(ptr + sizeof(int), &version, sizeof(uint8_t));
+                            memcpy(ptr + sizeof(int) + sizeof(uint8_t), vectorInfo + sizeof(int), m_vectorInfoSize - sizeof(uint8_t) - sizeof(int));
+                        }
+
+                        m_extraSearcher->GetWritePosting(begin, newPosting, true);
+                    }
+                }
+                m_index->SaveIndex(m_options.m_dspannIndexStoreFolder + FolderSep + m_options.m_headIndexFolder);
+                m_versionMap.Save(m_options.m_deleteIDFile);
+                ForceCompaction();
             }
         };
     } // namespace SPANN
