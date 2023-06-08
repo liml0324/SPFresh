@@ -12,6 +12,7 @@
 #include "inc/Core/Common/TruthSet.h"
 
 #include "inc/DSPANN/main.h"
+#include "inc/DSPANN/DSPANNSearch.h"
  
 using namespace SPTAG;
 
@@ -91,9 +92,24 @@ namespace SPTAG {
 				}
 			}
 
+			SPANN::Options* opts = nullptr;
+
+			#define DefineVectorValueType(Name, Type) \
+				if (index->GetVectorValueType() == VectorValueType::Name) { \
+					opts = ((SPANN::Index<Type>*)index.get())->GetOptions(); \
+				} \
+
+			#include "inc/Core/DefinitionList.h"
+			#undef DefineVectorValueType
+
 			#define DefineVectorValueType(Name, Type) \
                 if (index->GetVectorValueType() == VectorValueType::Name) { \
-                    ((SPANN::Index<Type>*)index.get())->MergeMultiIndex(); \
+					if (opts->m_dspannSearch) { \
+						DSPANNSearch((SPANN::Index<Type>*)(index.get())); \
+					} \
+					else { \
+						((SPANN::Index<Type>*)index.get())->MergeMultiIndex(); \
+					} \
                 } \
 
             #include "inc/Core/DefinitionList.h"

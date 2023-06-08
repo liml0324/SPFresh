@@ -181,6 +181,7 @@ namespace SPTAG {
             std::string m_dspannIndexFolderPrefix;
             std::string m_dspannIndexStoreFolder;
             std::string m_dspannIndexLabelPrefix;
+            bool m_dspannSearch;
 
 
             Options() {

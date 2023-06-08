@@ -165,6 +165,18 @@ namespace SPTAG
             if (m_options.m_excludehead) {
                 m_vectorTranslateMap.reset(new std::uint64_t[m_index->GetNumSamples()], std::default_delete<std::uint64_t[]>());
                 IOBINARY(p_indexStreams[m_index->GetIndexFiles()->size()], ReadBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), reinterpret_cast<char*>(m_vectorTranslateMap.get()));
+
+                // SPTAG::COMMON::Dataset<int> mappingData;
+                // LOG(Helper::LogLevel::LL_Info, "Load From %s\n", m_options.m_dspannIndexLabelPrefix.c_str());
+                // auto ptr = f_createIO();
+                // if (ptr == nullptr || !ptr->Initialize(m_options.m_dspannIndexLabelPrefix.c_str(), std::ios::binary | std::ios::in)) {
+                //     LOG(Helper::LogLevel::LL_Info, "Initialize Mapping Error: 0\n");
+                //     exit(1);
+                // }
+                // mappingData.Load(ptr, m_index->m_iDataBlockSize, m_index->m_iDataCapacity);
+                // for (int i = 0; i < m_index->GetNumSamples(); i++) {
+                //     (m_vectorTranslateMap.get())[i] = *mappingData[(m_vectorTranslateMap.get())[i]];
+                // }
             }
 
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
@@ -375,6 +387,8 @@ namespace SPTAG
             if (nullptr == m_extraSearcher) return ErrorCode::EmptyIndex;
 
             COMMON::QueryResultSet<T>* p_queryResults = (COMMON::QueryResultSet<T>*) & p_query;
+            QueryResult p_Result(NULL, m_options.m_searchInternalResultNum, false);
+            COMMON::QueryResultSet<T>* p_tempResult = (COMMON::QueryResultSet<T>*) & p_Result;
 
             if (m_workspace.get() == nullptr) {
                 m_workspace.reset(new ExtraWorkSpace());
@@ -393,7 +407,15 @@ namespace SPTAG
                 {
                     m_workspace->m_postingIDs.emplace_back(res->VID);
                 }
-                if (m_vectorTranslateMap.get() != nullptr) res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
+                if (m_vectorTranslateMap.get() != nullptr) {
+                    res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
+                    // LOG(Helper::LogLevel::LL_Info, "Head %d ID: %d, dist: %f ", res->VID, res->Dist);
+                    if(!m_workspace->m_deduper.CheckAndSet(res->VID)) {
+                        p_tempResult->AddPoint(res->VID, res->Dist);
+                    } 
+                    res->VID = -1;
+                    res->Dist = MaxDist;
+                }
                 else {
                     res->VID = -1;
                     res->Dist = MaxDist;
@@ -404,14 +426,31 @@ namespace SPTAG
             {
                 auto res = p_queryResults->GetResult(i);
                 if (res->VID == -1) break;
-                if (m_vectorTranslateMap.get() != nullptr)  res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
+                if (m_vectorTranslateMap.get() != nullptr)  {
+                    res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
+                    if(m_workspace->m_deduper.CheckAndSet(res->VID)) {
+                        p_tempResult->AddPoint(res->VID, res->Dist);
+                    }
+                    res->VID = -1;
+                    res->Dist = MaxDist;
+                }
                 else {
                     res->VID = -1;
                     res->Dist = MaxDist;
                 }
             }
-            if (m_vectorTranslateMap.get() != nullptr) p_queryResults->Reverse();
+            if (m_vectorTranslateMap.get() != nullptr) {
+                // p_queryResults->Reverse();
+            }
             m_extraSearcher->SearchIndex(m_workspace.get(), *p_queryResults, m_index, p_stats);
+            p_tempResult->SortResult();
+            if (m_vectorTranslateMap.get() != nullptr) {
+                for (int i = 0; i < p_tempResult->GetResultNum(); ++i) {
+                    auto res = p_tempResult->GetResult(i);
+                    if (res->VID == -1) break;
+                    p_queryResults->AddPoint(res->VID, res->Dist);
+                }
+            }
             p_queryResults->SortResult();
             return ErrorCode::Success;
         }

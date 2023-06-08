@@ -223,7 +223,7 @@ namespace SPTAG
                 return m_extraSearcher->AddIndex(vectorSet, m_index, begin);
             }
 
-            void MergeMultiIndex() {
+            ErrorCode MergeMultiIndex() {
                 if(!m_options.m_dspann) {
                     LOG(Helper::LogLevel::LL_Error, "Not Distributed SPANN\n");
                     exit(1);
@@ -259,8 +259,22 @@ namespace SPTAG
                 mappingDataFirst.Load(ptr, m_index->m_iDataBlockSize, m_index->m_iDataCapacity);
                 LOG(Helper::LogLevel::LL_Info, "Writing the first index postings\n");
                 int m_vectorInfoSize = sizeof(T) * m_options.m_dim + sizeof(int) + sizeof(uint8_t);
+
+                std::vector<int> newHeadMapping;
+                int length = m_index->GetNumSamples();
+                newHeadMapping.resize(length);
+
+                m_vectorTranslateMap.reset(new std::uint64_t[m_index->GetNumSamples()], std::default_delete<std::uint64_t[]>());
+                std::shared_ptr<Helper::DiskIO> mptr = SPTAG::f_createIO();
+                if (mptr == nullptr || !mptr->Initialize((m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str(), std::ios::binary | std::ios::in)) {
+                    LOG(Helper::LogLevel::LL_Error, "Failed to open headIDFile file:%s\n", (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str());
+                    exit(1);
+                }
+                IOBINARY(mptr, ReadBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), (char*)(m_vectorTranslateMap.get()));
+
                 #pragma omp parallel for num_threads(m_options.m_iSSDNumberOfThreads) schedule(dynamic,128)
                 for (int index = 0; index < m_index->GetNumSamples(); index++) {
+                    newHeadMapping[index]= *mappingDataFirst[(m_vectorTranslateMap.get())[index]];
                     std::string tempPosting;
                     storeExtraSearcher->GetWritePosting(index, tempPosting);
 
@@ -299,13 +313,29 @@ namespace SPTAG
                     }
                     std::shared_ptr<VectorIndex> m_mergedIndex;
                     LoadIndex(m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder, m_mergedIndex);
-                    LOG(Helper::LogLevel::LL_Info, "Merging the %d index postings\n", i);
+
+                    length += m_mergedIndex->GetNumSamples();
+                    newHeadMapping.resize(length);
+
+                    m_vectorTranslateMap.reset(new std::uint64_t[m_mergedIndex->GetNumSamples()], std::default_delete<std::uint64_t[]>());
+
+                    std::shared_ptr<Helper::DiskIO> mptr = SPTAG::f_createIO();
+                    if (mptr == nullptr || !mptr->Initialize((m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str(), std::ios::binary | std::ios::in)) {
+                        LOG(Helper::LogLevel::LL_Error, "Failed to open headIDFile file:%s\n", (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str());
+                        exit(1);
+                    }
+                    IOBINARY(mptr, ReadBinary, sizeof(std::uint64_t) * m_mergedIndex->GetNumSamples(), (char*)(m_vectorTranslateMap.get()));
+                    LOG(Helper::LogLevel::LL_Info, "Merging the %d index postings, newHeadMapping size: %d\n", i, newHeadMapping.size());
                     #pragma omp parallel for num_threads(m_options.m_iSSDNumberOfThreads) schedule(dynamic,128)
                     for (SizeType index = 0; index < m_mergedIndex->GetNumSamples(); index++) {
                         int begin, end = 0;
                         std::string tempPosting;
                         m_index->AddIndexId(m_mergedIndex->GetSample(index), 1, m_mergedIndex->GetFeatureDim(), begin, end);
+
+                        newHeadMapping[begin]= *mappingData[(m_vectorTranslateMap.get())[index]];
+
                         m_index->AddIndexIdx(begin, end);
+
                         storeExtraSearcher->GetWritePosting(index, tempPosting);
 
                         int vectorNum = (int)(tempPosting.size() / (m_vectorInfoSize - sizeof(uint8_t)));
@@ -325,9 +355,27 @@ namespace SPTAG
                         m_extraSearcher->GetWritePosting(begin, newPosting, true);
                     }
                 }
+
+                std::shared_ptr<Helper::DiskIO> outputIDs = SPTAG::f_createIO();
+                if (outputIDs == nullptr ||
+                    !outputIDs->Initialize((m_options.m_dspannIndexStoreFolder + FolderSep + m_options.m_headIDFile).c_str(), std::ios::binary | std::ios::out)) {
+                    LOG(Helper::LogLevel::LL_Error, "Failed to create output file: %s\n",
+                        (m_options.m_dspannIndexStoreFolder + FolderSep + m_options.m_headIDFile).c_str());
+                    exit(1);
+                }
+                for (int i = 0; i < newHeadMapping.size(); i++)
+                {
+                    uint64_t vid = static_cast<uint64_t>(newHeadMapping[i]);
+                    if (outputIDs->WriteBinary(sizeof(vid), reinterpret_cast<char*>(&vid)) != sizeof(vid)) {
+                        LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
+                        exit(1);
+                    }
+                }
+
                 m_index->SaveIndex(m_options.m_dspannIndexStoreFolder + FolderSep + m_options.m_headIndexFolder);
                 m_versionMap.Save(m_options.m_deleteIDFile);
                 ForceCompaction();
+                return ErrorCode::Success;
             }
         };
     } // namespace SPANN
