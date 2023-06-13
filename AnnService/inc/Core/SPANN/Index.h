@@ -30,6 +30,8 @@
 #include <functional>
 #include <shared_mutex>
 
+#include <tbb/concurrent_hash_map.h>
+
 namespace SPTAG
 {
 
@@ -261,8 +263,10 @@ namespace SPTAG
                 int m_vectorInfoSize = sizeof(T) * m_options.m_dim + sizeof(int) + sizeof(uint8_t);
 
                 std::vector<int> newHeadMapping;
-                int length = m_index->GetNumSamples();
-                newHeadMapping.resize(length);
+                tbb::concurrent_hash_map<int, int> HeadSet;
+                std::atomic_int length;
+                length.store(m_index->GetNumSamples());
+                newHeadMapping.resize(length.load());
 
                 m_vectorTranslateMap.reset(new std::uint64_t[m_index->GetNumSamples()], std::default_delete<std::uint64_t[]>());
                 std::shared_ptr<Helper::DiskIO> mptr = SPTAG::f_createIO();
@@ -274,7 +278,14 @@ namespace SPTAG
 
                 #pragma omp parallel for num_threads(m_options.m_iSSDNumberOfThreads) schedule(dynamic,128)
                 for (int index = 0; index < m_index->GetNumSamples(); index++) {
-                    newHeadMapping[index]= *mappingDataFirst[(m_vectorTranslateMap.get())[index]];
+                    newHeadMapping[index] = *mappingDataFirst[(m_vectorTranslateMap.get())[index]];
+
+                    tbb::concurrent_hash_map<int, int>::accessor headIDAccessor;
+
+                    HeadSet.insert(headIDAccessor, newHeadMapping[index]);
+
+                    headIDAccessor->second = index;
+
                     std::string tempPosting;
                     storeExtraSearcher->GetWritePosting(index, tempPosting);
 
@@ -315,7 +326,7 @@ namespace SPTAG
                     LoadIndex(m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder, m_mergedIndex);
 
                     length += m_mergedIndex->GetNumSamples();
-                    newHeadMapping.resize(length);
+                    newHeadMapping.resize(length.load());
 
                     m_vectorTranslateMap.reset(new std::uint64_t[m_mergedIndex->GetNumSamples()], std::default_delete<std::uint64_t[]>());
 
@@ -328,32 +339,85 @@ namespace SPTAG
                     LOG(Helper::LogLevel::LL_Info, "Merging the %d index postings, newHeadMapping size: %d\n", i, newHeadMapping.size());
                     #pragma omp parallel for num_threads(m_options.m_iSSDNumberOfThreads) schedule(dynamic,128)
                     for (SizeType index = 0; index < m_mergedIndex->GetNumSamples(); index++) {
-                        int begin, end = 0;
-                        std::string tempPosting;
-                        m_index->AddIndexId(m_mergedIndex->GetSample(index), 1, m_mergedIndex->GetFeatureDim(), begin, end);
+                        // LOG(Helper::LogLevel::LL_Info, "Checking set\n");
+                        if (HeadSet.count(*mappingData[(m_vectorTranslateMap.get())[index]]) == 1) {
+                            length--;
+                            // LOG(Helper::LogLevel::LL_Info, "Redundancy\n");
+                            tbb::concurrent_hash_map<int, int>::const_accessor headIDAccessor;
+                            if (!HeadSet.find(headIDAccessor , *mappingData[(m_vectorTranslateMap.get())[index]])) {
+                                LOG(Helper::LogLevel::LL_Error, "Failed to find head vector\n");
+                                exit(0);
+                            }
+                            int origin_index = headIDAccessor->second;
+                            std::string tempPosting_1, tempPosting_2;
+                            storeExtraSearcher->GetWritePosting(index, tempPosting_1);
+                            m_extraSearcher->GetWritePosting(origin_index, tempPosting_2);
+                            int vectorNum_1 = (int)(tempPosting_1.size() / (m_vectorInfoSize - sizeof(uint8_t)));
+                            int vectorNum_2 = (int)(tempPosting_2.size() / m_vectorInfoSize);
 
-                        newHeadMapping[begin]= *mappingData[(m_vectorTranslateMap.get())[index]];
+                            auto* postingP = reinterpret_cast<char*>(&tempPosting_1.front());
+                            std::string newPosting(m_vectorInfoSize * (vectorNum_1 + vectorNum_2) , '\0');
+                            char* ptr = (char*)(newPosting.c_str());
+                            std::set<int> VIDset;
+                            for (int j = 0; j < vectorNum_1; ++j, ptr += m_vectorInfoSize) {
+                                char* vectorInfo = postingP + j * (m_vectorInfoSize - sizeof(uint8_t));
+                                int VID = *mappingData[*(reinterpret_cast<int*>(vectorInfo))];
+                                VIDset.insert(VID);
+                                uint8_t version = m_versionMap.GetVersion(VID);
+                                memcpy(ptr, &VID, sizeof(int));
+                                memcpy(ptr + sizeof(int), &version, sizeof(uint8_t));
+                                memcpy(ptr + sizeof(int) + sizeof(uint8_t), vectorInfo + sizeof(int), m_vectorInfoSize - sizeof(uint8_t) - sizeof(int));
+                            }
 
-                        m_index->AddIndexIdx(begin, end);
+                            postingP = reinterpret_cast<char*>(&tempPosting_2.front());
+                            for (int j = 0; j < vectorNum_2; ++j) {
+                                char* vectorInfo = postingP + j * m_vectorInfoSize;
+                                int VID = *(reinterpret_cast<int*>(vectorInfo));
+                                if (VIDset.count(VID)) continue;
+                                uint8_t version = m_versionMap.GetVersion(VID);
+                                memcpy(ptr, &VID, sizeof(int));
+                                memcpy(ptr + sizeof(int), &version, sizeof(uint8_t));
+                                memcpy(ptr + sizeof(int) + sizeof(uint8_t), vectorInfo + sizeof(int) + sizeof(uint8_t), m_vectorInfoSize - sizeof(uint8_t) - sizeof(int));
+                                ptr += m_vectorInfoSize;
+                            }
+                            m_extraSearcher->GetWritePosting(origin_index, newPosting, true);
 
-                        storeExtraSearcher->GetWritePosting(index, tempPosting);
+                        } else{
+                            // LOG(Helper::LogLevel::LL_Info, "Not Redundancy\n");
+                            int begin, end = 0;
+                            std::string tempPosting;
+                            m_index->AddIndexId(m_mergedIndex->GetSample(index), 1, m_mergedIndex->GetFeatureDim(), begin, end);
 
-                        int vectorNum = (int)(tempPosting.size() / (m_vectorInfoSize - sizeof(uint8_t)));
+                            newHeadMapping[begin]= *mappingData[(m_vectorTranslateMap.get())[index]];
 
-                        auto* postingP = reinterpret_cast<char*>(&tempPosting.front());
-                        std::string newPosting(m_vectorInfoSize * vectorNum , '\0');
-                        char* ptr = (char*)(newPosting.c_str());
-                        for (int j = 0; j < vectorNum; ++j, ptr += m_vectorInfoSize) {
-                            char* vectorInfo = postingP + j * (m_vectorInfoSize - sizeof(uint8_t));
-                            int VID = *mappingData[*(reinterpret_cast<int*>(vectorInfo))];
-                            uint8_t version = m_versionMap.GetVersion(VID);
-                            memcpy(ptr, &VID, sizeof(int));
-                            memcpy(ptr + sizeof(int), &version, sizeof(uint8_t));
-                            memcpy(ptr + sizeof(int) + sizeof(uint8_t), vectorInfo + sizeof(int), m_vectorInfoSize - sizeof(uint8_t) - sizeof(int));
+                            tbb::concurrent_hash_map<int, int>::accessor headIDAccessor;
+
+                            HeadSet.insert(headIDAccessor, newHeadMapping[begin]);
+
+                            headIDAccessor->second = begin;
+
+                            m_index->AddIndexIdx(begin, end);
+
+                            storeExtraSearcher->GetWritePosting(index, tempPosting);
+
+                            int vectorNum = (int)(tempPosting.size() / (m_vectorInfoSize - sizeof(uint8_t)));
+
+                            auto* postingP = reinterpret_cast<char*>(&tempPosting.front());
+                            std::string newPosting(m_vectorInfoSize * vectorNum , '\0');
+                            char* ptr = (char*)(newPosting.c_str());
+                            for (int j = 0; j < vectorNum; ++j, ptr += m_vectorInfoSize) {
+                                char* vectorInfo = postingP + j * (m_vectorInfoSize - sizeof(uint8_t));
+                                int VID = *mappingData[*(reinterpret_cast<int*>(vectorInfo))];
+                                uint8_t version = m_versionMap.GetVersion(VID);
+                                memcpy(ptr, &VID, sizeof(int));
+                                memcpy(ptr + sizeof(int), &version, sizeof(uint8_t));
+                                memcpy(ptr + sizeof(int) + sizeof(uint8_t), vectorInfo + sizeof(int), m_vectorInfoSize - sizeof(uint8_t) - sizeof(int));
+                            }
+
+                            m_extraSearcher->GetWritePosting(begin, newPosting, true);
                         }
-
-                        m_extraSearcher->GetWritePosting(begin, newPosting, true);
                     }
+                    LOG(Helper::LogLevel::LL_Info, "After merging: size: %d\n", length.load());
                 }
 
                 std::shared_ptr<Helper::DiskIO> outputIDs = SPTAG::f_createIO();
@@ -363,7 +427,7 @@ namespace SPTAG
                         (m_options.m_dspannIndexStoreFolder + FolderSep + m_options.m_headIDFile).c_str());
                     exit(1);
                 }
-                for (int i = 0; i < newHeadMapping.size(); i++)
+                for (int i = 0; i < length.load(); i++)
                 {
                     uint64_t vid = static_cast<uint64_t>(newHeadMapping[i]);
                     if (outputIDs->WriteBinary(sizeof(vid), reinterpret_cast<char*>(&vid)) != sizeof(vid)) {

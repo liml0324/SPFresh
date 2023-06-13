@@ -409,7 +409,7 @@ namespace SPTAG
                 }
                 if (m_vectorTranslateMap.get() != nullptr) {
                     res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
-                    // LOG(Helper::LogLevel::LL_Info, "Head %d ID: %d, dist: %f ", res->VID, res->Dist);
+                    // LOG(Helper::LogLevel::LL_Info, "Head %d ID: %d, dist: %f ", i, res->VID, res->Dist);
                     if(!m_workspace->m_deduper.CheckAndSet(res->VID)) {
                         p_tempResult->AddPoint(res->VID, res->Dist);
                     } 
@@ -439,6 +439,7 @@ namespace SPTAG
                     res->Dist = MaxDist;
                 }
             }
+            // exit(0);
             if (m_vectorTranslateMap.get() != nullptr) {
                 // p_queryResults->Reverse();
             }
