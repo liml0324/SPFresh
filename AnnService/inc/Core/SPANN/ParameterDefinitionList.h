@@ -200,4 +200,5 @@ DefineSSDParameter(m_dspannIndexFolderPrefix, std::string, "", "DSPANNIndexFolde
 DefineSSDParameter(m_dspannIndexStoreFolder, std::string, "", "DSPANNIndexStoreFolder")
 DefineSSDParameter(m_dspannIndexLabelPrefix, std::string, "", "DSPANNIndexLabelPrefix")
 DefineSSDParameter(m_dspannSearch, bool, false, "DSPANNSearch")
+DefineSSDParameter(m_dspannCenters, std::string, "", "DSPANNCenters")
 #endif
