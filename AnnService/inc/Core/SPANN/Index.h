@@ -182,6 +182,10 @@ namespace SPTAG
 
             bool ExitBlockController() { return m_extraSearcher->ExitBlockController(); }
 
+            SizeType ReturnTrueId(SizeType headID) {
+                return static_cast<SizeType>((m_vectorTranslateMap.get())[headID]);
+            }
+
             ErrorCode AddIndexSPFresh(const void *p_data, SizeType p_vectorNum, DimensionType p_dimension, SizeType* VID) {
                 if ((!m_options.m_useKV &&!m_options.m_useSPDK) || m_extraSearcher == nullptr) {
                     LOG(Helper::LogLevel::LL_Error, "Only Support KV Extra Update\n");

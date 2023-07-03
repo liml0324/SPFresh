@@ -244,24 +244,314 @@ namespace SPTAG {
             SPTAG::SSDServing::SSDIndex::SearchSequential(p_index_super, numThreads, results_super, stats, p_opts.m_queryCountLimit, internalResultNum);
 
             LOG(Helper::LogLevel::LL_Info, "\nFinish Super Index ANN Search...\n");
-            int redundancy_normal = 0;
-            int redundancy_super = 0;
-            for (int i = 0; i < numQueries; ++i) {
-                COMMON::QueryResultSet<ValueType>* result = (COMMON::QueryResultSet<ValueType>*) &results_normal[i];
-                int lastVID;
-                for (int j = 0; j < result->GetResultNum(); ++j) {
-                    auto res = result->GetResult(j);
-                    if (j!=0 && lastVID == res->VID) redundancy_normal++;
-                    lastVID = res->VID;
-                }
-                result = (COMMON::QueryResultSet<ValueType>*) &results_super[i];
-                for (int j = 0; j < result->GetResultNum(); ++j) {
-                    auto res = result->GetResult(j);
-                    if (j!=0 && lastVID == res->VID) redundancy_super++;
-                    lastVID = res->VID;
+
+            std::shared_ptr<VectorSet> vectorSet;
+
+            if (!p_opts.m_vectorPath.empty() && fileexists(p_opts.m_vectorPath.c_str())) {
+                std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(p_opts.m_valueType, p_opts.m_dim, p_opts.m_vectorType, p_opts.m_vectorDelimiter));
+                auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
+                if (ErrorCode::Success == vectorReader->LoadFile(p_opts.m_vectorPath))
+                {
+                    vectorSet = vectorReader->GetVectorSet();
+                    if (p_opts.m_distCalcMethod == DistCalcMethod::Cosine) vectorSet->Normalize(numThreads);
+                    LOG(Helper::LogLevel::LL_Info, "\nLoad VectorSet(%d,%d).\n", vectorSet->Count(), vectorSet->Dimension());
                 }
             }
-            LOG(Helper::LogLevel::LL_Info, "Normal Redundancy: %d, Super Redundancy: %d\n", redundancy_normal, redundancy_super);
+
+            // int redundancy_normal = 0;
+            // int redundancy_super = 0;
+            // for (int i = 0; i < numQueries; ++i) {
+            //     COMMON::QueryResultSet<ValueType>* result = (COMMON::QueryResultSet<ValueType>*) &results_normal[i];
+            //     int lastVID;
+            //     for (int j = 0; j < result->GetResultNum(); ++j) {
+            //         auto res = result->GetResult(j);
+            //         if (j!=0 && lastVID == res->VID) redundancy_normal++;
+            //         lastVID = res->VID;
+            //     }
+            //     result = (COMMON::QueryResultSet<ValueType>*) &results_super[i];
+            //     for (int j = 0; j < result->GetResultNum(); ++j) {
+            //         auto res = result->GetResult(j);
+            //         if (j!=0 && lastVID == res->VID) redundancy_super++;
+            //         lastVID = res->VID;
+            //     }
+            // }
+            // LOG(Helper::LogLevel::LL_Info, "Normal Redundancy: %d, Super Redundancy: %d\n", redundancy_normal, redundancy_super);
+
+            std::vector<float> thisrecall_normal(numQueries);
+            std::vector<float> thisrecall_super(numQueries);
+            std::vector<std::vector<int>> hitTruth_normal;
+            std::vector<std::vector<int>> hitTruth_super;
+
+            float recall = 0, MRR = 0;
+            std::vector<std::set<SizeType>> truth;
+            if (!truthFile.empty())
+            {
+                LOG(Helper::LogLevel::LL_Info, "Start loading TruthFile...\n");
+
+                auto ptr = f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(truthFile.c_str(), std::ios::in | std::ios::binary)) {
+                    LOG(Helper::LogLevel::LL_Error, "Failed open truth file: %s\n", truthFile.c_str());
+                    exit(1);
+                }
+                int originalK = truthK;
+                COMMON::TruthSet::LoadTruth(ptr, truth, numQueries, originalK, truthK, p_opts.m_truthType);
+                char tmp[4];
+                if (ptr->ReadBinary(4, tmp) == 4) {
+                    LOG(Helper::LogLevel::LL_Error, "Truth number is larger than query number(%d)!\n", numQueries);
+                }
+
+                recall = CalculateRecall<ValueType>((p_index_super->GetMemoryIndex()).get(), results_normal, truth, K, truthK, querySet, vectorSet, numQueries, thisrecall_normal, hitTruth_normal, nullptr, false, &MRR);
+                LOG(Helper::LogLevel::LL_Info, "Nomral Recall%d@%d: %f MRR@%d: %f\n", truthK, K, recall, K, MRR);
+                recall = CalculateRecall<ValueType>((p_index_super->GetMemoryIndex()).get(), results_super, truth, K, truthK, querySet, vectorSet, numQueries, thisrecall_super, hitTruth_super, nullptr, false, &MRR);
+                LOG(Helper::LogLevel::LL_Info, "Super Recall%d@%d: %f MRR@%d: %f\n", truthK, K, recall, K, MRR);
+            }
+
+            //Load Partition Info
+
+            std::vector<SPTAG::COMMON::Dataset<short>> mappingInfoVecs(32);
+
+            for (int i = 0; i < 32; i++) {
+                std::string filename = p_opts.m_dspannIndexLabelPrefix + std::to_string(i);
+                LOG(Helper::LogLevel::LL_Info, "Load From %s\n", filename.c_str());
+                auto ptr = f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::in)) {
+                    LOG(Helper::LogLevel::LL_Info, "Initialize Mapping Error: %d\n", i);
+                    exit(1);
+                }
+                mappingInfoVecs[i].Load(ptr, p_index_super->m_iDataBlockSize, p_index_super->m_iDataCapacity);
+            }
+
+            ValueType* centers = (ValueType*)ALIGN_ALLOC(sizeof(ValueType) * 5 * p_opts.m_dim);
+
+            {
+                auto ptr = f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(p_opts.m_dspannCenters.c_str(), std::ios::binary | std::ios::in)) {
+                    LOG(Helper::LogLevel::LL_Error, "Failed to read center file %s.\n", p_opts.m_dspannCenters.c_str());
+                }
+
+                SizeType r;
+                DimensionType c;
+                DimensionType col = p_opts.m_dim;
+                SizeType row = 5;
+                ptr->ReadBinary(sizeof(SizeType), (char*)&r) != sizeof(SizeType);
+                ptr->ReadBinary(sizeof(DimensionType), (char*)&c) != sizeof(DimensionType);
+
+                if (r != row || c != col) {
+                    LOG(Helper::LogLevel::LL_Error, "Row(%d,%d) or Col(%d,%d) cannot match.\n", r, row, c, col);
+                }
+
+                ptr->ReadBinary(sizeof(ValueType) * row * col, (char*)centers);
+            }
+
+            int count = 0;
+
+            for (int i = 0; i < numQueries; i++) {
+                if (thisrecall_normal[i] <= thisrecall_super[i]) continue;
+                std::map<int, int> missStatus;
+                for (auto id : truth[i]) {
+                    int fileNum_id = id / 31250000;
+                    int offset_id = id % 31250000;
+
+                    QueryResult testTruth(NULL, max(K, internalResultNum), false);
+                    (*((COMMON::QueryResultSet<ValueType>*)&testTruth)).SetTarget(reinterpret_cast<ValueType*>(vectorSet->GetVector(id)), p_index_normal->m_pQuantizer);
+                    p_index_super->GetMemoryIndex()->SearchIndex(testTruth);
+                    COMMON::QueryResultSet<ValueType>* p_queryResults = (COMMON::QueryResultSet<ValueType>*) & testTruth;
+
+                    int miss = 0;
+
+                    for (int i = 0; i < p_queryResults->GetResultNum(); ++i)
+                    {
+                        auto res = p_queryResults->GetResult(i);
+                        if (res->VID == -1) break;
+                        auto realHeadID = p_index_super->ReturnTrueId(res->VID);
+                        
+                        int fileNum_head = realHeadID / 31250000;
+                        int offset_head = realHeadID % 31250000;
+
+                        for (int j = 0; j < 4; j++) {
+                            if (mappingInfoVecs[fileNum_id][offset_id][j] > 4) continue;
+                            bool found = false;
+                            for (int k = 0; k < 4; k++) {
+                                if (mappingInfoVecs[fileNum_head][offset_head][k] > 4) continue;
+                                if (mappingInfoVecs[fileNum_head][offset_head][k] == mappingInfoVecs[fileNum_id][offset_id][j]) {
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if (!found) {
+                                miss++;
+                                break;
+                            }
+                        }
+                    }
+                    if (miss!=0) missStatus[id] = miss;
+                }
+                LOG(Helper::LogLevel::LL_Info, "Query: %d, BuildSSDIndex Recall: %f, Super Recall: %f\n", i, thisrecall_normal[i], thisrecall_super[i]);
+                for (auto iter : missStatus) {
+                    bool right = false;
+                    for (int j = 0; j < hitTruth_normal[i].size(); j++) {
+                        if (hitTruth_normal[i][j] == iter.first) right = true;
+                    }
+                    if (!right) continue; 
+                    // LOG(Helper::LogLevel::LL_Info, "missStatus: %d, %d\n", iter.first, iter.second);
+                    float minDist = MaxDist;
+                    int minId;
+                    float minSecondDist = MaxDist;
+                    int minSecId;
+                    for (int j = 0; j < 5; j++) {
+                        float dist = COMMON::DistanceUtils::ComputeDistance((const ValueType*)vectorSet->GetVector(iter.first), (const ValueType*)centers + j* p_opts.m_dim, vectorSet->Dimension(), p_index_super->GetDistCalcMethod());
+                        if (minDist > dist) {
+                            minDist = dist;
+                            minId = j;
+                        }
+                        else if (minSecondDist > dist) {
+                            minSecondDist = dist;
+                            minSecId = j;
+                        }
+                    }
+                    // LOG(Helper::LogLevel::LL_Info, "first %f, second %f, factor : %f\n", minDist, minSecondDist, minSecondDist/minDist);
+                    bool found = false;
+                    for (int j = 0; j < hitTruth_super[i].size(); j++) {
+                        if (hitTruth_super[i][j] == iter.first) found = true;
+                    }
+                    if (!found) {
+                        count++;
+                        LOG(Helper::LogLevel::LL_Info, "missStatus: %d, %d\n", iter.first, iter.second);
+                        LOG(Helper::LogLevel::LL_Info, "first %f/%d, second %f/%d, factor : %f\n", minDist, minId, minSecondDist, minSecId, minSecondDist/minDist);
+                        LOG(Helper::LogLevel::LL_Info, "Recall Loss\n");
+                        int fileNum_id = iter.first / 31250000;
+                        int offset_id = iter.first % 31250000;
+                        for (int k = 0; k < 4; k++) {
+                            LOG(Helper::LogLevel::LL_Info, "In %hd ", mappingInfoVecs[fileNum_id][offset_id][k]);
+                        }
+                        LOG(Helper::LogLevel::LL_Info, "\n");
+                    }
+                }
+                LOG(Helper::LogLevel::LL_Info, "\n");
+            }
+            LOG(Helper::LogLevel::LL_Info, "Loss With Boundary issue: %d\n", count);
+
+            // scan loss vectors
+            // std::map<int, std::vector<int>> lossVectors;
+            // for (int i = 0; i < numQueries; i++) {
+            //     int lossNum = thisrecall_normal[i] - thisrecall_super[i];
+            //     if (lossNum == 10) {
+            //         std::vector<int> lossVector;
+            //         for (int j = 0; j < hitTruth_normal[i].size(); j++) {
+            //             bool found = false;
+            //             for (int k = 0; k < hitTruth_super[i].size(); k++) {
+            //                 if (hitTruth_normal[i][j] == hitTruth_super[i][j]) {
+            //                     found = true;
+            //                     break;
+            //                 }
+            //             }
+            //             if (!found) lossVector.push_back(hitTruth_normal[i][j]);
+            //         }
+            //         lossVectors[i] = lossVector;
+            //     }
+            // }
+
+            // // Load Centers, disabled first
+
+
+            // // scan the status of loss vectors
+
+            // int lossNearest = 0;
+
+            // for (auto lossIter : lossVectors) {
+            //     int queryId = lossIter.first;
+            //     float minDist = 0;
+            //     // Check the query;
+            //     QueryResult testQuery(NULL, max(K, internalResultNum), false);
+            //     (*((COMMON::QueryResultSet<ValueType>*)&testQuery)).SetTarget(reinterpret_cast<ValueType*>(querySet->GetVector(queryId)), p_index_normal->m_pQuantizer);
+            //     p_index_super->GetMemoryIndex()->SearchIndex(testQuery);
+            //     COMMON::QueryResultSet<ValueType>* p_queryResults = (COMMON::QueryResultSet<ValueType>*) & testQuery;
+            //     for (int i = 0; i < p_queryResults->GetResultNum(); ++i)
+            //     {
+            //         auto res = p_queryResults->GetResult(i);
+            //         if (res->VID == -1) break;
+            //         LOG(Helper::LogLevel::LL_Info, "Query Id: %d, Search Head: %d, Dist: %f\n", queryId, res->VID, res->Dist);
+            //     }
+
+            //     for (auto lossId : lossIter.second) {
+            //         QueryResult testQueryLoss(NULL, max(K, internalResultNum), false);
+            //         (*((COMMON::QueryResultSet<ValueType>*)&testQueryLoss)).SetTarget(reinterpret_cast<ValueType*>(vectorSet->GetVector(lossId)), p_index_normal->m_pQuantizer);
+            //         p_index_super->GetMemoryIndex()->SearchIndex(testQueryLoss);
+            //         p_queryResults = (COMMON::QueryResultSet<ValueType>*) & testQueryLoss;
+
+            //         for (int i = 0; i < p_queryResults->GetResultNum(); ++i)
+            //         {
+            //             auto res = p_queryResults->GetResult(i);
+            //             if (res->VID == -1) break;
+            //             float dist_head = COMMON::DistanceUtils::ComputeDistance((const ValueType*)querySet->GetVector(queryId), (const ValueType*)p_index_super->GetMemoryIndex()->GetSample(res->VID), vectorSet->Dimension(), p_index_super->GetDistCalcMethod());
+            //             if (!lossHead && dist_head < p_queryResults->GetResult(0)->Dist) {
+            //                 lossHead=true;
+            //                 lossNearest++;
+            //             }
+            //             LOG(Helper::LogLevel::LL_Info, "Vector Id: %d, Search Head: %d, Dist: %f, ToQuery Dist: %f\n", lossId, res->VID, res->Dist, dist_head);
+            //         }
+            //     }
+            // }
+//             std::atomic_int lossNearest_super(0);
+//             std::atomic_int lossNearest_normal(0);
+// #pragma omp parallel for schedule(dynamic)
+//             for (int queryId = 0; queryId < numQueries; queryId++) {
+//                 QueryResult testQuery(NULL, max(K, internalResultNum), false);
+//                 //Search Super
+//                 (*((COMMON::QueryResultSet<ValueType>*)&testQuery)).SetTarget(reinterpret_cast<ValueType*>(querySet->GetVector(queryId)), p_index_normal->m_pQuantizer);
+//                 p_index_super->GetMemoryIndex()->SearchIndex(testQuery);
+//                 COMMON::QueryResultSet<ValueType>* p_queryResults = (COMMON::QueryResultSet<ValueType>*) & testQuery;
+
+//                 float minDist = p_queryResults->GetResult(0)->Dist;
+
+//                 for (auto lossId : truth[queryId]) {
+//                     QueryResult testQueryLoss(NULL, max(K, internalResultNum), false);
+//                     (*((COMMON::QueryResultSet<ValueType>*)&testQueryLoss)).SetTarget(reinterpret_cast<ValueType*>(vectorSet->GetVector(lossId)), p_index_normal->m_pQuantizer);
+//                     p_index_super->GetMemoryIndex()->SearchIndex(testQueryLoss);
+//                     p_queryResults = (COMMON::QueryResultSet<ValueType>*) & testQueryLoss;
+
+//                     for (int i = 0; i < p_queryResults->GetResultNum(); ++i)
+//                     {
+//                         auto res = p_queryResults->GetResult(i);
+//                         if (res->VID == -1) break;
+//                         float dist_head = COMMON::DistanceUtils::ComputeDistance((const ValueType*)querySet->GetVector(queryId), (const ValueType*)p_index_super->GetMemoryIndex()->GetSample(res->VID), vectorSet->Dimension(), p_index_super->GetDistCalcMethod());
+//                         if (dist_head < minDist) {
+//                             lossNearest_super++;
+//                         }
+//                         // LOG(Helper::LogLevel::LL_Info, "Vector Id: %d, Search Head: %d, Dist: %f, ToQuery Dist: %f\n", lossId, res->VID, res->Dist, dist_head);
+//                     }
+//                 }
+                
+
+//                 (*((COMMON::QueryResultSet<ValueType>*)&testQuery)).SetTarget(reinterpret_cast<ValueType*>(querySet->GetVector(queryId)), p_index_normal->m_pQuantizer);
+//                 testQuery.Reset();
+//                 p_index_normal->GetMemoryIndex()->SearchIndex(testQuery);
+//                 p_queryResults = (COMMON::QueryResultSet<ValueType>*) & testQuery;
+
+//                 minDist = p_queryResults->GetResult(0)->Dist;
+
+//                 for (auto lossId : truth[queryId]) {
+//                     QueryResult testQueryLoss(NULL, max(K, internalResultNum), false);
+//                     (*((COMMON::QueryResultSet<ValueType>*)&testQueryLoss)).SetTarget(reinterpret_cast<ValueType*>(vectorSet->GetVector(lossId)), p_index_normal->m_pQuantizer);
+//                     p_index_normal->GetMemoryIndex()->SearchIndex(testQueryLoss);
+//                     p_queryResults = (COMMON::QueryResultSet<ValueType>*) & testQueryLoss;
+
+//                     for (int i = 0; i < p_queryResults->GetResultNum(); ++i)
+//                     {
+//                         auto res = p_queryResults->GetResult(i);
+//                         if (res->VID == -1) break;
+//                         float dist_head = COMMON::DistanceUtils::ComputeDistance((const ValueType*)querySet->GetVector(queryId), (const ValueType*)p_index_normal->GetMemoryIndex()->GetSample(res->VID), vectorSet->Dimension(), p_index_super->GetDistCalcMethod());
+//                         if (dist_head < minDist) {
+//                             lossNearest_normal++;
+//                         }
+//                         // LOG(Helper::LogLevel::LL_Info, "Vector Id: %d, Search Head: %d, Dist: %f, ToQuery Dist: %f\n", lossId, res->VID, res->Dist, dist_head);
+//                     }
+//                 }
+//                 //Search Normal
+//             }
+
+//             LOG(Helper::LogLevel::LL_Info, "lossNearest Head Super : %d, lossNearest Head Normal : %d\n", lossNearest_super.load(), lossNearest_normal.load());
+
             return 0;
         }
     }
