@@ -51,10 +51,10 @@ namespace SPTAG {
 				}
 			}
 
-			if (index->BuildIndex() != ErrorCode::Success) {
-				LOG(Helper::LogLevel::LL_Error, "Failed to build index.\n");
-				exit(1);
-			}
+			// if (index->BuildIndex() != ErrorCode::Success) {
+			// 	LOG(Helper::LogLevel::LL_Error, "Failed to build index.\n");
+			// 	exit(1);
+			// }
 
 			return index;
 		}
@@ -63,11 +63,13 @@ namespace SPTAG {
 			std::map<std::string, std::map<std::string, std::string>> my_map_normal;
 			std::map<std::string, std::map<std::string, std::string>> my_map_super;
 			auto index_normal = readIndex(&my_map_normal, configurationPath_normal);
-			auto index_super = readIndex(&my_map_super, configurationPath_super);
+			// auto index_super = readIndex(&my_map_super, configurationPath_super);
+
+			// DSPANN::compareIndex((SPANN::Index<Type>*)(index_normal.get()), (SPANN::Index<Type>*)(index_super.get()));
 
 			#define DefineVectorValueType(Name, Type) \
-			if (index_super->GetVectorValueType() == VectorValueType::Name) { \
-				DSPANN::compareIndex((SPANN::Index<Type>*)(index_normal.get()), (SPANN::Index<Type>*)(index_super.get())); \
+			if (index_normal->GetVectorValueType() == VectorValueType::Name) { \
+				((SPANN::Index<Type>*)(index_normal.get()))->MergeMultiIndex(); \
 			} \
 
 		#include "inc/Core/DefinitionList.h"
