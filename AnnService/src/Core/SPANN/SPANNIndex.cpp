@@ -428,7 +428,7 @@ namespace SPTAG
                 if (res->VID == -1) break;
                 if (m_vectorTranslateMap.get() != nullptr)  {
                     res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
-                    if(m_workspace->m_deduper.CheckAndSet(res->VID)) {
+                    if(!m_workspace->m_deduper.CheckAndSet(res->VID)) {
                         p_tempResult->AddPoint(res->VID, res->Dist);
                     }
                     res->VID = -1;
