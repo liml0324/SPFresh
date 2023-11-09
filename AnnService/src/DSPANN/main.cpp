@@ -59,24 +59,36 @@ namespace SPTAG {
 			return index;
 		}
 
-		int BootProgram(const char* configurationPath_normal, const char* configurationPath_super) {
-			std::map<std::string, std::map<std::string, std::string>> my_map_normal;
-			std::map<std::string, std::map<std::string, std::string>> my_map_super;
-			auto index_normal = readIndex(&my_map_normal, configurationPath_normal);
-			// auto index_super = readIndex(&my_map_super, configurationPath_super);
+		// int BootProgram(const char* configurationPath_normal, const char* configurationPath_super) {
+		// 	std::map<std::string, std::map<std::string, std::string>> my_map_normal;
+		// 	std::map<std::string, std::map<std::string, std::string>> my_map_super;
+		// 	auto index_normal = readIndex(&my_map_normal, configurationPath_normal);
+		// 	// auto index_super = readIndex(&my_map_super, configurationPath_super);
 
-			// DSPANN::compareIndex((SPANN::Index<Type>*)(index_normal.get()), (SPANN::Index<Type>*)(index_super.get()));
+		// 	// DSPANN::compareIndex((SPANN::Index<Type>*)(index_normal.get()), (SPANN::Index<Type>*)(index_super.get()));
 
+		// 	#define DefineVectorValueType(Name, Type) \
+		// 	if (index_normal->GetVectorValueType() == VectorValueType::Name) { \
+		// 		((SPANN::Index<Type>*)(index_normal.get()))->MergeMultiIndex(); \
+		// 	} \
+
+		// #include "inc/Core/DefinitionList.h"
+		// #undef DefineVectorValueType
+
+		// 	return 0;
+		// } 
+		int BootProgram(const char* configurationPath) {
+			std::map<std::string, std::map<std::string, std::string>> my_map;
+			auto index = readIndex(&my_map, configurationPath);
 			#define DefineVectorValueType(Name, Type) \
-			if (index_normal->GetVectorValueType() == VectorValueType::Name) { \
-				((SPANN::Index<Type>*)(index_normal.get()))->MergeMultiIndex(); \
+			if (index->GetVectorValueType() == VectorValueType::Name) { \
+				DSPANNSearch((SPANN::Index<Type>*)(index.get())); \
 			} \
 
-		#include "inc/Core/DefinitionList.h"
-		#undef DefineVectorValueType
-
+			#include "inc/Core/DefinitionList.h"
+			#undef DefineVectorValueType
 			return 0;
-		} 
+		}
 	}
 }
 
@@ -84,13 +96,20 @@ namespace SPTAG {
 #ifdef _exe
 
 int main(int argc, char* argv[]) {
-	if (argc < 3)
+	// if (argc < 3)
+	// {
+	// 	LOG(Helper::LogLevel::LL_Error,
+	// 		"ssdserving configFilePath\n");
+	// 	exit(-1);
+	// }
+	// auto ret = DSPANN::BootProgram(argv[1], argv[2]);
+	if (argc < 2)
 	{
 		LOG(Helper::LogLevel::LL_Error,
 			"ssdserving configFilePath\n");
 		exit(-1);
 	}
-	auto ret = DSPANN::BootProgram(argv[1], argv[2]);
+	auto ret = DSPANN::BootProgram(argv[1]);
 	return ret;
 }
 

@@ -35,6 +35,28 @@ namespace SPTAG {
             std::vector<std::set<int>> visited;
             visited.resize(numQueries);
 
+            ValueType* centers = (ValueType*)ALIGN_ALLOC(sizeof(ValueType) * p_opts.m_dspannIndexFileNum * p_opts.m_dim);
+
+            {
+                auto ptr = f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(p_opts.m_dspannCenters.c_str(), std::ios::binary | std::ios::in)) {
+                    LOG(Helper::LogLevel::LL_Error, "Failed to read center file %s.\n", p_opts.m_dspannCenters.c_str());
+                }
+
+                SizeType r;
+                DimensionType c;
+                DimensionType col = p_opts.m_dim;
+                SizeType row = p_opts.m_dspannIndexFileNum;
+                ptr->ReadBinary(sizeof(SizeType), (char*)&r) != sizeof(SizeType);
+                ptr->ReadBinary(sizeof(DimensionType), (char*)&c) != sizeof(DimensionType);
+
+                if (r != row || c != col) {
+                    LOG(Helper::LogLevel::LL_Error, "Row(%d,%d) or Col(%d,%d) cannot match.\n", r, row, c, col);
+                }
+
+                ptr->ReadBinary(sizeof(ValueType) * row * col, (char*)centers);
+            }
+
             for (int i = 0; i < p_opts.m_dspannIndexFileNum; i++) {
                 std::string storePath = p_opts.m_dspannIndexFolderPrefix + "_" + std::to_string(i);
                 std::shared_ptr<VectorIndex> index;
@@ -62,6 +84,16 @@ namespace SPTAG {
                 }
                 mappingData.Load(ptr, p_opts.m_datasetRowsInBlock, p_opts.m_datasetCapacity);
                 for (int index = 0; index < numQueries; index++) {
+                    float minDist = MaxDist;
+                    int minId;
+                    for (int j = 0; j < p_opts.m_dspannIndexFileNum; j++) {
+                        float dist = COMMON::DistanceUtils::ComputeDistance((const ValueType*)querySet->GetVector(index), (const ValueType*)centers + j* p_opts.m_dim, querySet->Dimension(), p_index->GetDistCalcMethod());
+                        if (minDist > dist) {
+                            minDist = dist;
+                            minId = j;
+                        }
+                    }
+                    if (minId != i) continue;
                     COMMON::QueryResultSet<ValueType>* p_queryResults = (COMMON::QueryResultSet<ValueType>*) & (tempResults[index]);
                     COMMON::QueryResultSet<ValueType>* p_queryResultsFinal = (COMMON::QueryResultSet<ValueType>*) & (results[index]);
                     for (int j = 0; j < p_queryResults->GetResultNum(); ++j) {
