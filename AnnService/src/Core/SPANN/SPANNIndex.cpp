@@ -240,7 +240,7 @@ namespace SPTAG
                 };
             for (int j = 0; j < m_options.m_iSSDNumberOfThreads; j++) { threads.emplace_back(func); }
             for (auto& thread : threads) { thread.join(); }
-            } else {
+            } else if (m_options.m_useKV) {
                 m_versionMap.Load(m_options.m_deleteIDFile, m_index->m_iDataBlockSize, m_index->m_iDataCapacity);
             }
 
