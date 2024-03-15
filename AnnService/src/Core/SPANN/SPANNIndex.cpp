@@ -631,7 +631,7 @@ namespace SPTAG
                 int l = m_options.m_splitFactor;
                 int r = m_options.m_splitThreshold;
 
-                while (l < r - 1)
+                // while (l < r - 1)
                 {
                     opts.m_splitThreshold = (l + r) / 2;
                     p_selected.clear();
@@ -709,20 +709,29 @@ namespace SPTAG
             else if (Helper::StrUtils::StrEqualIgnoreCase(m_options.m_selectType.c_str(), "BKT")) {
                 LOG(Helper::LogLevel::LL_Info, "Start generating BKT.\n");
                 std::shared_ptr<COMMON::BKTree> bkt = std::make_shared<COMMON::BKTree>();
-                bkt->m_iBKTKmeansK = m_options.m_iBKTKmeansK;
-                bkt->m_iBKTLeafSize = m_options.m_iBKTLeafSize;
-                bkt->m_iSamples = m_options.m_iSamples;
-                bkt->m_iTreeNumber = m_options.m_iTreeNumber;
-                bkt->m_fBalanceFactor = m_options.m_fBalanceFactor;
-                LOG(Helper::LogLevel::LL_Info, "Start invoking BuildTrees.\n");
-                LOG(Helper::LogLevel::LL_Info, "BKTKmeansK: %d, BKTLeafSize: %d, Samples: %d, BKTLambdaFactor:%f TreeNumber: %d, ThreadNum: %d.\n",
-                    bkt->m_iBKTKmeansK, bkt->m_iBKTLeafSize, bkt->m_iSamples, bkt->m_fBalanceFactor, bkt->m_iTreeNumber, m_options.m_iSelectHeadNumberOfThreads);
+                if (!m_options.m_loadBKT) {
+                    LOG(Helper::LogLevel::LL_Info, "Start generating BKT.\n");
+                    bkt->m_iBKTKmeansK = m_options.m_iBKTKmeansK;
+                    bkt->m_iBKTLeafSize = m_options.m_iBKTLeafSize;
+                    bkt->m_iSamples = m_options.m_iSamples;
+                    bkt->m_iTreeNumber = m_options.m_iTreeNumber;
+                    bkt->m_fBalanceFactor = m_options.m_fBalanceFactor;
+                    LOG(Helper::LogLevel::LL_Info, "Start invoking BuildTrees.\n");
+                    LOG(Helper::LogLevel::LL_Info, "BKTKmeansK: %d, BKTLeafSize: %d, Samples: %d, BKTLambdaFactor:%f TreeNumber: %d, ThreadNum: %d.\n",
+                        bkt->m_iBKTKmeansK, bkt->m_iBKTLeafSize, bkt->m_iSamples, bkt->m_fBalanceFactor, bkt->m_iTreeNumber, m_options.m_iSelectHeadNumberOfThreads);
 
-                bkt->BuildTrees<InternalDataType>(data, m_options.m_distCalcMethod, m_options.m_iSelectHeadNumberOfThreads, nullptr, nullptr, true);
-                auto t2 = std::chrono::high_resolution_clock::now();
-                double elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count();
-                LOG(Helper::LogLevel::LL_Info, "End invoking BuildTrees.\n");
-                LOG(Helper::LogLevel::LL_Info, "Invoking BuildTrees used time: %.2lf minutes (about %.2lf hours).\n", elapsedSeconds / 60.0, elapsedSeconds / 3600.0);
+                    bkt->BuildTrees<InternalDataType>(data, m_options.m_distCalcMethod, m_options.m_iSelectHeadNumberOfThreads, nullptr, nullptr, true);
+                    auto t2 = std::chrono::high_resolution_clock::now();
+                    double elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count();
+                    LOG(Helper::LogLevel::LL_Info, "End invoking BuildTrees.\n");
+                    LOG(Helper::LogLevel::LL_Info, "Invoking BuildTrees used time: %.2lf minutes (about %.2lf hours).\n", elapsedSeconds / 60.0, elapsedSeconds / 3600.0);
+                } else {
+                    std::stringstream bktFileNameBuilder;
+                    bktFileNameBuilder << m_options.m_vectorPath << ".bkt." << m_options.m_iBKTKmeansK << "_"
+                        << m_options.m_iBKTLeafSize << "_" << m_options.m_iTreeNumber << "_" << m_options.m_iSamples << "_"
+                        << static_cast<int>(m_options.m_distCalcMethod) << ".bin";
+                    bkt->LoadTrees(bktFileNameBuilder.str());
+                }
 
                 if (m_options.m_saveBKT) {
                     std::stringstream bktFileNameBuilder;
@@ -909,10 +918,10 @@ namespace SPTAG
                 if (m_options.m_buildSsdIndex) {
                     if (!m_options.m_excludehead) {
                         LOG(Helper::LogLevel::LL_Info, "Include all vectors into SSD index...\n");
-                        if (fileexists((m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str()) &&
-                            remove((m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str()) != 0) {
-                            LOG(Helper::LogLevel::LL_Warning, "Head vector file can't be removed.\n");
-                        }
+                        // if (fileexists((m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str()) &&
+                        //     remove((m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str()) != 0) {
+                        //     LOG(Helper::LogLevel::LL_Warning, "Head vector file can't be removed.\n");
+                        // }
                     }
 
                     if (!m_extraSearcher->BuildIndex(p_reader, m_index, m_options, m_versionMap)) {

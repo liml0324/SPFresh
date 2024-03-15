@@ -47,6 +47,7 @@ DefineSelectHeadParameter(m_fBalanceFactor, float, -1.0F, "BKTLambdaFactor")
 
 DefineSelectHeadParameter(m_iSelectHeadNumberOfThreads, int, 4, "NumberOfThreads")
 DefineSelectHeadParameter(m_saveBKT, bool, false, "SaveBKT")
+DefineSelectHeadParameter(m_loadBKT, bool, false, "LoadBKT")
 
 DefineSelectHeadParameter(m_analyzeOnly, bool, false, "AnalyzeOnly")
 DefineSelectHeadParameter(m_calcStd, bool, false, "CalcStd")

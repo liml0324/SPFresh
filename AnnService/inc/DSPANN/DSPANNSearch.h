@@ -57,6 +57,44 @@ namespace SPTAG {
                 ptr->ReadBinary(sizeof(ValueType) * row * col, (char*)centers);
             }
 
+            // Top 3 selection
+
+            int top = 2;
+
+            int needToTraverse[numQueries][top];
+
+            struct ShardWithDist
+            {
+                int id;
+
+                float dist;
+            };
+
+            // struct ShardWithDistCmp
+            // {
+            //     bool operator()(const ShardWithDist& a, const ShardWithDist& b) const
+            //     {
+            //         return a.dist == b.dist ? a.id < b.id : a.dist < b.dist;
+            //     }
+            // };
+
+            for (int index = 0; index < numQueries; index++) {
+                std::vector<ShardWithDist> shardDist(5);
+                for (int j = 0; j < p_opts.m_dspannIndexFileNum; j++) {
+                    float dist = COMMON::DistanceUtils::ComputeDistance((const ValueType*)querySet->GetVector(index), (const ValueType*)centers + j* p_opts.m_dim, querySet->Dimension(), p_index->GetDistCalcMethod());
+                    shardDist[j].id = j;
+                    shardDist[j].dist = dist;
+                }
+
+                std::sort(shardDist.begin(), shardDist.end(), [&](ShardWithDist& a, const ShardWithDist& b){
+                    return a.dist == b.dist ? a.id < b.id : a.dist < b.dist;
+                });
+
+                for (int j = 0; j < top; j++) {
+                    needToTraverse[index][j] = shardDist[j].id;
+                }
+            }
+
             for (int i = 0; i < p_opts.m_dspannIndexFileNum; i++) {
                 std::string storePath = p_opts.m_dspannIndexFolderPrefix + "_" + std::to_string(i);
                 std::shared_ptr<VectorIndex> index;
@@ -83,17 +121,41 @@ namespace SPTAG {
                     exit(1);
                 }
                 mappingData.Load(ptr, p_opts.m_datasetRowsInBlock, p_opts.m_datasetCapacity);
+                // Top 1 selection
+                // for (int index = 0; index < numQueries; index++) {
+                //     float minDist = MaxDist;
+                //     int minId;
+                //     for (int j = 0; j < p_opts.m_dspannIndexFileNum; j++) {
+                //         float dist = COMMON::DistanceUtils::ComputeDistance((const ValueType*)querySet->GetVector(index), (const ValueType*)centers + j* p_opts.m_dim, querySet->Dimension(), p_index->GetDistCalcMethod());
+                //         if (minDist > dist) {
+                //             minDist = dist;
+                //             minId = j;
+                //         }
+                //     }
+                //     if (minId != i) continue;
+                //     COMMON::QueryResultSet<ValueType>* p_queryResults = (COMMON::QueryResultSet<ValueType>*) & (tempResults[index]);
+                //     COMMON::QueryResultSet<ValueType>* p_queryResultsFinal = (COMMON::QueryResultSet<ValueType>*) & (results[index]);
+                //     for (int j = 0; j < p_queryResults->GetResultNum(); ++j) {
+                //         auto res = p_queryResults->GetResult(j);
+                //         if (res->VID == -1) break;
+                //         if (visited[index].find(*mappingData[res->VID]) != visited[index].end()) continue;
+                //         visited[index].insert(*mappingData[res->VID]);
+                //         p_queryResultsFinal->AddPoint(*mappingData[res->VID], res->Dist);
+                //     }
+                // }
+
+                // Top selection
                 for (int index = 0; index < numQueries; index++) {
-                    float minDist = MaxDist;
-                    int minId;
-                    for (int j = 0; j < p_opts.m_dspannIndexFileNum; j++) {
-                        float dist = COMMON::DistanceUtils::ComputeDistance((const ValueType*)querySet->GetVector(index), (const ValueType*)centers + j* p_opts.m_dim, querySet->Dimension(), p_index->GetDistCalcMethod());
-                        if (minDist > dist) {
-                            minDist = dist;
-                            minId = j;
+                    bool found = false;
+                    for (int j = 0; j < top; j++) {
+                        if (needToTraverse[index][j] == i)
+                        {
+                            found = true;
+                            break;
                         }
                     }
-                    if (minId != i) continue;
+
+                    if (!found) continue;
                     COMMON::QueryResultSet<ValueType>* p_queryResults = (COMMON::QueryResultSet<ValueType>*) & (tempResults[index]);
                     COMMON::QueryResultSet<ValueType>* p_queryResultsFinal = (COMMON::QueryResultSet<ValueType>*) & (results[index]);
                     for (int j = 0; j < p_queryResults->GetResultNum(); ++j) {

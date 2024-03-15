@@ -415,7 +415,7 @@ namespace SPTAG
                     return false;
                 }
 
-                if (fileexists((p_opt.m_indexDirectory + FolderSep + p_opt.m_headIDFile).c_str()))
+                if (p_opt.m_excludehead && fileexists((p_opt.m_indexDirectory + FolderSep + p_opt.m_headIDFile).c_str()))
                 {
                     auto ptr = SPTAG::f_createIO();
                     if (ptr == nullptr || !ptr->Initialize((p_opt.m_indexDirectory + FolderSep +  p_opt.m_headIDFile).c_str(), std::ios::binary | std::ios::in)) {

@@ -55,6 +55,7 @@ namespace SPTAG {
             float m_fBalanceFactor;
             int m_iSelectHeadNumberOfThreads;
             bool m_saveBKT;
+            bool m_loadBKT;
             // analyze
             bool m_analyzeOnly;
             bool m_calcStd;

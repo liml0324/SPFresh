@@ -11,6 +11,8 @@
 #include "inc/Helper/VectorSetReader.h"
 #include "inc/Helper/CommonHelper.h"
 
+#include <atomic>
+
 using namespace SPTAG;
 
 #define CHECKIO(ptr, func, bytes, ...) if (ptr->func(bytes, __VA_ARGS__) != bytes) { \
@@ -27,7 +29,7 @@ public:
     {
         AddRequiredOption(m_inputFiles, "-i", "--input", "Input raw data.");
         AddRequiredOption(m_clusterNum, "-c", "--numclusters", "Number of clusters.");
-        AddOptionalOption(m_stopDifference, "-d", "--diff", "Clustering stop center difference.");
+        AddOptionalOption(m_stopDifference, "-df", "--diff", "Clustering stop center difference.");
         AddOptionalOption(m_maxIter, "-r", "--iters", "Max clustering iterations.");
         AddOptionalOption(m_localSamples, "-s", "--samples", "Number of samples for fast clustering.");
         AddOptionalOption(m_lambda, "-l", "--lambda", "lambda for balanced size level.");
@@ -260,11 +262,15 @@ template <typename T>
 inline float HardMultipleClustersAssign(const COMMON::Dataset<T>& data,
     std::vector<SizeType>& indices,
     const SizeType first, const SizeType last, COMMON::KmeansArgs<T>& args, COMMON::Dataset<LabelType>& label, SizeType* mylimit, std::vector<float>& weights,
-    const int clusternum, const bool fill) {
+    const int clusternum, const bool fill, float* shardRadius) {
     float currDist = 0;
     SizeType subsize = (last - first - 1) / args._T + 1;
 
     SPTAG::Edge* items = new SPTAG::Edge[last - first];
+
+    std::atomic_int countFilter(0);
+    std::atomic_int countFilterFunc1(0);
+    std::atomic_int countFilterFunc2(0);
 
     auto func1 = [&](int tid)
     {
@@ -281,6 +287,30 @@ inline float HardMultipleClustersAssign(const COMMON::Dataset<T>& data,
             std::sort(centerDist.begin(), centerDist.end(), [](const SPTAG::NodeDistPair& a, const SPTAG::NodeDistPair& b) {
                 return (a.distance < b.distance) || (a.distance == b.distance && a.node < b.node);
                 });
+
+            // if (centerDist[clusternum].distance >= shardRadius[clusternum]) {
+            //     LOG(Helper::LogLevel::LL_Info, "ID: %d shardDist: %f, to top0 dist: %f, to top%d dist: %f, top0 radius: %f, top%d radius: %f\n", 
+            //         i, shardDist, centerDist[0].distance, clusternum, centerDist[clusternum].distance, shardRadius[0], clusternum,shardRadius[clusternum]);
+            // }
+
+            float shardDist = args.fComputeDistance(args.centers + centerDist[clusternum].node * args._D, args.centers + centerDist[0].node * args._D, args._D);
+            
+            float tempDist = centerDist[clusternum].distance - centerDist[0].distance;
+
+            float tempDist_2 = 4 * centerDist[0].distance * shardDist;
+
+            if (clusternum > 0 && tempDist * tempDist >= tempDist_2) {
+                countFilter++;
+                if (centerDist[clusternum].distance <= centerDist[0].distance * options.m_closurefactor) {
+                    countFilterFunc1++;
+                }
+                // LOG(Helper::LogLevel::LL_Info, "ID: %d shardDist: %f, to top0 dist: %f, to top%d dist: %f, top0 radius: %f, top%d radius: %f, temp1: %f, temp2: %f\n", 
+                    // i, shardDist, centerDist[0].distance, clusternum, centerDist[clusternum].distance, shardRadius[0], clusternum,shardRadius[clusternum], tempDist * tempDist, tempDist_2);
+            }
+
+            if (clusternum > 0 && centerDist[clusternum].distance >= centerDist[0].distance + shardRadius[centerDist[0].node] + shardRadius[centerDist[clusternum].node]) {
+                countFilterFunc2++;
+            }
 
             if (centerDist[clusternum].distance <= centerDist[0].distance * options.m_closurefactor) {
                 items[i - first].node = centerDist[clusternum].node;
@@ -301,6 +331,8 @@ inline float HardMultipleClustersAssign(const COMMON::Dataset<T>& data,
         for (int i = 0; i < args._T; i++) { threads.emplace_back(func1, i); }
         for (auto& thread : threads) { thread.join(); }
     }
+
+    LOG(Helper::LogLevel::LL_Info, "Cluster num: %d, filter out: %d, A & B only remain: %d, C filter out: %d\n", clusternum, countFilter.load(), countFilterFunc1.load(), countFilterFunc2.load());
 
     std::sort(items, items + last - first, g_edgeComparer);
 
@@ -447,6 +479,9 @@ void Process(MPI_Datatype type) {
         MPI_Allreduce(args.newWeightedCounts, args.weightedCounts, args._K, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
         MPI_Allreduce(&d, &currDist, 1, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
 
+        // ALl reduce radius
+        MPI_Allreduce(MPI_IN_PLACE, args.clusterDist, args._K, MPI_FLOAT, MPI_MAX, MPI_COMM_WORLD);
+
         if (currDist < minClusterDist) {
             noImprovement = 0;
             minClusterDist = currDist;
@@ -478,6 +513,24 @@ void Process(MPI_Datatype type) {
                 LOG(Helper::LogLevel::LL_Info, "cluster %d contains vectors:%d weights:%f\n", i, args.counts[i], args.weightedCounts[i]);
         }
     }
+
+    // Store in another place
+    float shardRadius[args._K];
+    for (int i = 0; i < args._K; i++) {
+        shardRadius[i] = args.clusterDist[i];
+    }
+
+    if (rank == 0) {
+        for (int i = 0; i < args._K; i++) {
+            LOG(Helper::LogLevel::LL_Info, "Shard %d: radius %f\n", i, shardRadius[i]);
+            for (int j = 0; j < args._K; j++) {
+                if (j == i) continue;
+                float dist = args.fComputeDistance(args.centers + i * args._D, args.centers + j * args._D, args._D);
+                LOG(Helper::LogLevel::LL_Info, "Shard %d to %d, distance %f\n", i, j, dist);
+            }
+        }
+    }
+
     d = 0;
     for (SizeType i = 0; i < data.R(); i++) localindices[i] = i;
     std::vector<SizeType> myLimit(args._K, (options.m_hardcut == 0) ? data.R() : (SizeType)(options.m_hardcut * totalCount / size));
@@ -485,7 +538,7 @@ void Process(MPI_Datatype type) {
     args.ClearCounts();
     args.ClearDists(0);
     for (int i = 0; i < options.m_clusterassign - 1; i++) {
-        d += HardMultipleClustersAssign<T>(data, localindices, 0, data.R(), args, label, myLimit.data(), weights, i, false);
+        d += HardMultipleClustersAssign<T>(data, localindices, 0, data.R(), args, label, myLimit.data(), weights, i, false, shardRadius);
         std::memcpy(myLimit.data(), args.counts, sizeof(SizeType)*args._K);
         MPI_Allreduce(MPI_IN_PLACE, args.counts, args._K, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
         MPI_Allreduce(MPI_IN_PLACE, args.weightedCounts, args._K, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
@@ -498,7 +551,7 @@ void Process(MPI_Datatype type) {
             if (totalCount > args.counts[k])
                 myLimit[k] += (SizeType)((totalCount - args.counts[k]) / size);
     }
-    d += HardMultipleClustersAssign<T>(data, localindices, 0, data.R(), args, label, myLimit.data(), weights, options.m_clusterassign - 1, true);
+    d += HardMultipleClustersAssign<T>(data, localindices, 0, data.R(), args, label, myLimit.data(), weights, options.m_clusterassign - 1, true, shardRadius);
     std::memcpy(args.newCounts, args.counts, sizeof(SizeType)*args._K);
     MPI_Allreduce(args.newCounts, args.counts, args._K, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
     MPI_Allreduce(MPI_IN_PLACE, args.weightedCounts, args._K, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
@@ -857,8 +910,12 @@ void ProcessWithoutMPI() {
     std::memset(args.counts, 0, sizeof(SizeType) * args._K);
     args.ClearCounts();
     args.ClearDists(0);
+
+    // Todo: Store in another place, currently useless
+    float shardRadius[args._K];
+
     for (int i = 0; i < options.m_clusterassign - 1; i++) {
-        d += HardMultipleClustersAssign<T>(data, localindices, 0, data.R(), args, label, myLimit.data(), weights, i, false);
+        d += HardMultipleClustersAssign<T>(data, localindices, 0, data.R(), args, label, myLimit.data(), weights, i, false, shardRadius);
         std::memcpy(myLimit.data(), args.counts, sizeof(SizeType) * args._K);
         SyncSaveCenter(args, rank, 10000 + iteration + 1 + i, data.R(), d, options.m_lambda, currDiff, minClusterDist, noImprovement, 0, true);
         SyncLoadCenter(args, rank, 10000 + iteration + 1 + i, tmpTotalCount, currDist, options.m_lambda, currDiff, minClusterDist, noImprovement, false);
@@ -871,7 +928,7 @@ void ProcessWithoutMPI() {
             if (totalCount > args.counts[k])
                 myLimit[k] += (SizeType)((totalCount - args.counts[k]) / options.m_totalparts);
     }
-    d += HardMultipleClustersAssign<T>(data, localindices, 0, data.R(), args, label, myLimit.data(), weights, options.m_clusterassign - 1, true);
+    d += HardMultipleClustersAssign<T>(data, localindices, 0, data.R(), args, label, myLimit.data(), weights, options.m_clusterassign - 1, true, shardRadius);
     std::memcpy(args.newCounts, args.counts, sizeof(SizeType) * args._K);
     SyncSaveCenter(args, rank, 10000 + iteration + options.m_clusterassign, data.R(), d, options.m_lambda, currDiff, minClusterDist, noImprovement, 0, true);
     SyncLoadCenter(args, rank, 10000 + iteration + options.m_clusterassign, tmpTotalCount, currDist, options.m_lambda, currDiff, minClusterDist, noImprovement, false);

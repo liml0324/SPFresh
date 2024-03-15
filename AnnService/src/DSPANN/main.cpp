@@ -59,9 +59,8 @@ namespace SPTAG {
 			return index;
 		}
 
-		// int BootProgram(const char* configurationPath_normal, const char* configurationPath_super) {
+		// int BootProgram(const char* configurationPath_normal) {
 		// 	std::map<std::string, std::map<std::string, std::string>> my_map_normal;
-		// 	std::map<std::string, std::map<std::string, std::string>> my_map_super;
 		// 	auto index_normal = readIndex(&my_map_normal, configurationPath_normal);
 		// 	// auto index_super = readIndex(&my_map_super, configurationPath_super);
 
