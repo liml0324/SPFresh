@@ -948,6 +948,8 @@ namespace SPTAG
                             return ErrorCode::Fail;
                         }
                         IOBINARY(ptr, ReadBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), (char*)(m_vectorTranslateMap.get()));
+                    } else {
+                        LOG(Helper::LogLevel::LL_Info, "Head All Included in Partition\n");
                     }
                     if ((m_options.m_useKV || m_options.m_useSPDK) && m_options.m_preReassign) {
                         m_extraSearcher->RefineIndex(p_reader, m_index);

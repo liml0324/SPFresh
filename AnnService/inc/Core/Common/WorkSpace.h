@@ -33,6 +33,8 @@ namespace SPTAG
             // [m_poolSize + 1, 2*(m_poolSize + 1)) is the second block;
             std::unique_ptr<SizeType[]> m_hashTable;
 
+            int m_actualCheck;
+
 
             inline unsigned hash_func2(unsigned idx, int poolSize, int loop)
             {
@@ -63,6 +65,8 @@ namespace SPTAG
                 m_poolSize = (1 << (ex + exp)) - 1;
                 m_hashTable.reset(new SizeType[(m_poolSize + 1) * 2]);
                 clear();
+
+                m_actualCheck = 0;
             }
 
             void clear()
@@ -78,6 +82,7 @@ namespace SPTAG
                     m_secondHash = false;
                     memset(m_hashTable.get(), 0, 2 * sizeof(SizeType) * (m_poolSize + 1));
                 }
+                m_actualCheck = 0;
             }
 
             inline int HashTableExponent() const { return m_exp; }
@@ -87,7 +92,9 @@ namespace SPTAG
             inline bool CheckAndSet(SizeType idx)
             {
                 // Inner Index is begin from 1
-                return _CheckAndSet(m_hashTable.get(), m_poolSize, true, idx + 1) == 0;
+                bool flag = _CheckAndSet(m_hashTable.get(), m_poolSize, true, idx + 1) == 0;
+                if (!flag) m_actualCheck++;
+                return flag;
             }
 
             inline void DoubleSize()
@@ -135,6 +142,10 @@ namespace SPTAG
                 DoubleSize();
                 LOG(Helper::LogLevel::LL_Error, "Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=%d NewPoolSize=%d\n", m_exp, m_poolSize);
                 return _CheckAndSet(m_hashTable.get(), m_poolSize, true, idx);
+            }
+
+            inline int CheckedVectors() {
+                return m_actualCheck;
             }
         };
 
@@ -253,6 +264,11 @@ namespace SPTAG
                 return nodeCheckStatus.HashTableExponent(); 
             }
 
+            inline int CheckedVectors()
+            {
+                return nodeCheckStatus.CheckedVectors();
+            }
+
             static void Reset() {}
 
             OptHashPosVector nodeCheckStatus;
@@ -263,6 +279,8 @@ namespace SPTAG
             int m_iNumberOfTreeCheckedLeaves;
             int m_iNumberOfCheckedLeaves;
             int m_iMaxCheck;
+
+            int m_acturalCheck;
 
             // Prioriy queue used for neighborhood graph
             Heap<NodeDistPair> m_NGQueue;

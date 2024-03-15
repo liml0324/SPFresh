@@ -34,7 +34,8 @@ namespace SPTAG {
                 m_asyncLatency1(0),
                 m_asyncLatency2(0),
                 m_queueLatency(0),
-                m_sleepLatency(0)
+                m_sleepLatency(0),
+                m_headElementsCount(0)
             {
             }
 
@@ -69,6 +70,8 @@ namespace SPTAG {
             double m_diskReadLatency;
 
             double m_exSetUpLatency;
+
+            int m_headElementsCount;
 
             std::chrono::steady_clock::time_point m_searchRequestTime;
 
