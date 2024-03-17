@@ -10,6 +10,7 @@
 #include "inc/Core/Common/TruthSet.h"
 #include "Compressor.h"
 
+#include <chrono>
 #include <map>
 #include <cmath>
 #include <climits>
@@ -102,6 +103,7 @@ namespace SPTAG
 }\
 
 #define ProcessPosting() \
+        auto t1 = std::chrono::high_resolution_clock::now(); \
         for (int i = 0; i < listInfo->listEleCount; i++) { \
             uint64_t offsetVectorID, offsetVector;\
             (this->*m_parsePosting)(offsetVectorID, offsetVector, i, listInfo->listEleCount);\
@@ -111,6 +113,10 @@ namespace SPTAG
             auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector); \
             queryResults.AddPoint(vectorID, distance2leaf); \
         } \
+        auto t2 = std::chrono::high_resolution_clock::now(); \
+        computeLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count()) / 1000.0; \
+
+
 
         template <typename ValueType>
         class ExtraStaticSearcher : public IExtraSearcher
@@ -201,6 +207,8 @@ namespace SPTAG
                 int diskIO = 0;
                 int listElements = 0;
 
+                double computeLatency = 0;
+
 #if defined(ASYNC_READ) && !defined(BATCH_READ)
                 int unprocessed = 0;
 #endif
@@ -232,7 +240,7 @@ namespace SPTAG
                     request.m_success = false;
 
 #ifdef BATCH_READ // async batch read
-                    request.m_callback = [&p_exWorkSpace, &queryResults, &p_index, &request, this](bool success)
+                    request.m_callback = [&p_exWorkSpace, &queryResults, &p_index, &request, &computeLatency, this](bool success)
                     {
                         char* buffer = request.m_buffer;
                         ListInfo* listInfo = (ListInfo*)(request.m_payload);
@@ -336,6 +344,7 @@ namespace SPTAG
                     p_stats->m_totalListElementsCount = listElements;
                     p_stats->m_diskIOCount = diskIO;
                     p_stats->m_diskAccessCount = diskRead;
+                    p_stats->m_compLatency = computeLatency;
                 }
             }
 
