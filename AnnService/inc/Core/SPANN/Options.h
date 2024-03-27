@@ -184,6 +184,7 @@ namespace SPTAG {
             std::string m_dspannIndexLabelPrefix;
             bool m_dspannSearch;
             std::string m_dspannCenters;
+            int m_dspannTopK;
 
 
             Options() {

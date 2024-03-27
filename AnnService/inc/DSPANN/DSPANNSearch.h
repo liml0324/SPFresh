@@ -57,9 +57,11 @@ namespace SPTAG {
                 ptr->ReadBinary(sizeof(ValueType) * row * col, (char*)centers);
             }
 
+            LOG(Helper::LogLevel::LL_Info, "Load Center Finished\n");
+
             // Top 3 selection
 
-            int top = 2;
+            int top = p_opts.m_dspannTopK;
 
             int needToTraverse[numQueries][top];
 
@@ -70,16 +72,8 @@ namespace SPTAG {
                 float dist;
             };
 
-            // struct ShardWithDistCmp
-            // {
-            //     bool operator()(const ShardWithDist& a, const ShardWithDist& b) const
-            //     {
-            //         return a.dist == b.dist ? a.id < b.id : a.dist < b.dist;
-            //     }
-            // };
-
             for (int index = 0; index < numQueries; index++) {
-                std::vector<ShardWithDist> shardDist(5);
+                std::vector<ShardWithDist> shardDist(p_opts.m_dspannIndexFileNum);
                 for (int j = 0; j < p_opts.m_dspannIndexFileNum; j++) {
                     float dist = COMMON::DistanceUtils::ComputeDistance((const ValueType*)querySet->GetVector(index), (const ValueType*)centers + j* p_opts.m_dim, querySet->Dimension(), p_index->GetDistCalcMethod());
                     shardDist[j].id = j;
@@ -95,10 +89,12 @@ namespace SPTAG {
                 }
             }
 
+            LOG(Helper::LogLevel::LL_Info, "Caclulating Traverse\n");
+
             for (int i = 0; i < p_opts.m_dspannIndexFileNum; i++) {
                 std::string storePath = p_opts.m_dspannIndexFolderPrefix + "_" + std::to_string(i);
                 std::shared_ptr<VectorIndex> index;
-                LOG(Helper::LogLevel::LL_Info, "Loading %d SPANN Indices\n", i);
+                LOG(Helper::LogLevel::LL_Info, "Loading %d SPANN Indices: %s\n", i, storePath.c_str());
                 if (index->LoadIndex(storePath, index) != ErrorCode::Success) {
                     LOG(Helper::LogLevel::LL_Error, "Failed to load index.\n");
                     return 1;
