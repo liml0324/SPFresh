@@ -72,7 +72,11 @@ namespace SPTAG {
                 float dist;
             };
 
+            std::vector<SPANN::SearchStats> stats_real(numQueries);
+
             for (int index = 0; index < numQueries; index++) {
+                stats_real[index].m_headElementsCount = 0;
+                stats_real[index].m_totalListElementsCount = 0;
                 std::vector<ShardWithDist> shardDist(p_opts.m_dspannIndexFileNum);
                 for (int j = 0; j < p_opts.m_dspannIndexFileNum; j++) {
                     float dist = COMMON::DistanceUtils::ComputeDistance((const ValueType*)querySet->GetVector(index), (const ValueType*)centers + j* p_opts.m_dim, querySet->Dimension(), p_index->GetDistCalcMethod());
@@ -91,6 +95,8 @@ namespace SPTAG {
 
             LOG(Helper::LogLevel::LL_Info, "Caclulating Traverse\n");
 
+
+
             for (int i = 0; i < p_opts.m_dspannIndexFileNum; i++) {
                 std::string storePath = p_opts.m_dspannIndexFolderPrefix + "_" + std::to_string(i);
                 std::shared_ptr<VectorIndex> index;
@@ -107,7 +113,7 @@ namespace SPTAG {
                     tempResults[j].Reset();
                 }
                 std::vector<SPANN::SearchStats> stats(numQueries);
-                SSDServing::SPFresh::SearchSequential((SPANN::Index<ValueType>*)index.get(), p_opts.m_searchThreadNum, tempResults, stats, p_opts.m_queryCountLimit, p_opts.m_searchInternalResultNum);
+                SSDServing::SSDIndex::SearchSequential((SPANN::Index<ValueType>*)index.get(), p_opts.m_searchThreadNum, tempResults, stats, p_opts.m_queryCountLimit, p_opts.m_searchInternalResultNum);
                 std::string filename = p_opts.m_dspannIndexLabelPrefix + std::to_string(i);
                 SPTAG::COMMON::Dataset<int> mappingData;
                 LOG(Helper::LogLevel::LL_Info, "Load From %s\n", filename.c_str());
@@ -152,6 +158,8 @@ namespace SPTAG {
                     }
 
                     if (!found) continue;
+                    stats_real[index].m_headElementsCount += stats[index].m_headElementsCount;
+                    stats_real[index].m_totalListElementsCount += stats[index].m_totalListElementsCount;
                     COMMON::QueryResultSet<ValueType>* p_queryResults = (COMMON::QueryResultSet<ValueType>*) & (tempResults[index]);
                     COMMON::QueryResultSet<ValueType>* p_queryResultsFinal = (COMMON::QueryResultSet<ValueType>*) & (results[index]);
                     for (int j = 0; j < p_queryResults->GetResultNum(); ++j) {
@@ -200,6 +208,21 @@ namespace SPTAG {
                 recall = COMMON::TruthSet::CalculateRecall<ValueType>(p_index, results, truth, K, truthK, querySet, vectorSet, numQueries, nullptr, false, &MRR);
                 LOG(Helper::LogLevel::LL_Info, "Recall%d@%d: %f MRR@%d: %f\n", truthK, K, recall, K, MRR);
             }
+            LOG(Helper::LogLevel::LL_Info, "\nHead Elements Count:\n");
+            SSDServing::SSDIndex::PrintPercentiles<double, SPANN::SearchStats>(stats_real,
+                    [](const SPANN::SearchStats& ss) -> double
+                    {
+                        return ss.m_headElementsCount;
+                    },
+                    "%.3lf");
+
+            LOG(Helper::LogLevel::LL_Info, "\nEx Elements Count:\n");
+            SSDServing::SSDIndex::PrintPercentiles<double, SPANN::SearchStats>(stats_real,
+                [](const SPANN::SearchStats& ss) -> double
+                {
+                    return ss.m_totalListElementsCount;
+                },
+                "%.3lf");
 
             return 0;
         }
