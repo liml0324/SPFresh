@@ -137,7 +137,8 @@ namespace SPTAG {
                                 double endTime = threadws.getElapsedMs();
                                 p_index->SearchDiskIndex(p_results[index], &(p_stats[index]));
                                 double exEndTime = threadws.getElapsedMs();
-
+                                
+                                p_stats[index].m_realElementsCount = p_stats[index].m_headElementsCount + p_stats[index].m_totalListElementsCount;
                                 p_stats[index].m_exLatency = exEndTime - endTime;
                                 p_stats[index].m_totalLatency = p_stats[index].m_totalSearchLatency = exEndTime - startTime;
                             }
@@ -299,6 +300,14 @@ namespace SPTAG {
                     [](const SPANN::SearchStats& ss) -> double
                     {
                         return ss.m_totalListElementsCount;
+                    },
+                    "%.3lf");
+
+                LOG(Helper::LogLevel::LL_Info, "\nTotal Elements Count:\n");
+                PrintPercentiles<double, SPANN::SearchStats>(stats,
+                    [](const SPANN::SearchStats& ss) -> double
+                    {
+                        return ss.m_realElementsCount;
                     },
                     "%.3lf");
 

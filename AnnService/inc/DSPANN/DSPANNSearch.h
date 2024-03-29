@@ -73,6 +73,7 @@ namespace SPTAG {
             };
 
             std::vector<SPANN::SearchStats> stats_real(numQueries);
+            std::vector<std::vector<int>> queryAccessDistribution(numQueries);
 
             for (int index = 0; index < numQueries; index++) {
                 stats_real[index].m_headElementsCount = 0;
@@ -169,6 +170,8 @@ namespace SPTAG {
                         visited[index].insert(*mappingData[res->VID]);
                         p_queryResultsFinal->AddPoint(*mappingData[res->VID], res->Dist);
                     }
+                    int totalCount = stats[index].m_headElementsCount + stats[index].m_totalListElementsCount;
+                    queryAccessDistribution[index].push_back(totalCount);
                 }
             }
             for (int index = 0; index < numQueries; index++) {
@@ -221,6 +224,60 @@ namespace SPTAG {
                 [](const SPANN::SearchStats& ss) -> double
                 {
                     return ss.m_totalListElementsCount;
+                },
+                "%.3lf");
+
+            std::vector<int> real_latencyDistribution(numQueries);
+            std::vector<int> differ(numQueries);
+            for (int index = 0; index < numQueries; index++) {
+                std::vector<int> collects;
+                collects.reserve(queryAccessDistribution[index].size());
+                for (const auto& v : queryAccessDistribution[index])
+                {
+                    int tmp = v;
+                    collects.push_back(tmp);
+                }
+
+                std::sort(collects.begin(), collects.end());
+                // LOG(Helper::LogLevel::LL_Info, "Query: %d\n", index);
+                // LOG(Helper::LogLevel::LL_Info, "0tiles\t50tiles\t90tiles\t95tiles\t99tiles\t99.9tiles\tMax\n");
+
+                // std::string formatStr("%4d");
+                // for (int i = 1; i < 7; ++i)
+                // {
+                //     formatStr += '\t';
+                //     formatStr += "%4d";
+                // }
+
+                // formatStr += '\n';
+
+                // LOG(Helper::LogLevel::LL_Info,
+                //     formatStr.c_str(),
+                //     collects[static_cast<size_t>(0)],
+                //     collects[static_cast<size_t>(collects.size() * 0.50)],
+                //     collects[static_cast<size_t>(collects.size() * 0.90)],
+                //     collects[static_cast<size_t>(collects.size() * 0.95)],
+                //     collects[static_cast<size_t>(collects.size() * 0.99)],
+                //     collects[static_cast<size_t>(collects.size() * 0.999)],
+                //     collects[static_cast<size_t>(collects.size() - 1)]);
+
+                real_latencyDistribution[index] = collects[collects.size()-1];
+                differ[index] = (collects[collects.size()-1] - collects[0]);
+            }
+
+            LOG(Helper::LogLevel::LL_Info, "\nReal Latency Count:\n");
+            SSDServing::SSDIndex::PrintPercentiles<double, int>(real_latencyDistribution,
+                [](const int& ss) -> double
+                {
+                    return ss;
+                },
+                "%.3lf");
+
+            LOG(Helper::LogLevel::LL_Info, "\nReal Count Differ:\n");
+            SSDServing::SSDIndex::PrintPercentiles<double, int>(differ,
+                [](const int& ss) -> double
+                {
+                    return ss;
                 },
                 "%.3lf");
 
