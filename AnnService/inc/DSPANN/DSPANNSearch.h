@@ -73,7 +73,12 @@ namespace SPTAG {
             };
 
             std::vector<SPANN::SearchStats> stats_real(numQueries);
+            std::vector<int> queryAccessShard(p_opts.m_dspannIndexFileNum);
             std::vector<std::vector<int>> queryAccessDistribution(numQueries);
+
+            for (int index = 0; index < p_opts.m_dspannIndexFileNum; index++) {
+                queryAccessShard[index] = 0;
+            }
 
             for (int index = 0; index < numQueries; index++) {
                 stats_real[index].m_headElementsCount = 0;
@@ -90,6 +95,7 @@ namespace SPTAG {
                 });
 
                 for (int j = 0; j < top; j++) {
+                    queryAccessShard[shardDist[j].id] += 1;
                     needToTraverse[index][j] = shardDist[j].id;
                 }
             }
@@ -275,6 +281,14 @@ namespace SPTAG {
 
             LOG(Helper::LogLevel::LL_Info, "\nReal Count Differ:\n");
             SSDServing::SSDIndex::PrintPercentiles<double, int>(differ,
+                [](const int& ss) -> double
+                {
+                    return ss;
+                },
+                "%.3lf");
+
+            LOG(Helper::LogLevel::LL_Info, "\nAccess Shard Distribution:\n");
+            SSDServing::SSDIndex::PrintPercentiles<double, int>(queryAccessShard,
                 [](const int& ss) -> double
                 {
                     return ss;
