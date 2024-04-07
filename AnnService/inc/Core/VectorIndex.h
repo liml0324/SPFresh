@@ -39,7 +39,7 @@ public:
 
     virtual ErrorCode SearchIndex(QueryResult& p_results, bool p_searchDeleted = false) const = 0;
 
-    virtual ErrorCode SearchIndex(QueryResult& p_query, int& searchedVectorNumber, bool p_searchDeleted = false) { return ErrorCode::Undefined; }
+    virtual ErrorCode SearchIndex(QueryResult& p_query, int& searchedVectorNumber, int& m_commCost, bool p_searchDeleted = false) { return ErrorCode::Undefined; }
     
     virtual ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const = 0;
 

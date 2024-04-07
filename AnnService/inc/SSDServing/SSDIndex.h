@@ -133,7 +133,7 @@ namespace SPTAG {
                                 }
 
                                 double startTime = threadws.getElapsedMs();
-                                p_index->GetMemoryIndex()->SearchIndex(p_results[index], p_stats[index].m_headElementsCount);
+                                p_index->GetMemoryIndex()->SearchIndex(p_results[index], p_stats[index].m_headElementsCount, p_stats[index].m_commCost);
                                 double endTime = threadws.getElapsedMs();
                                 p_index->SearchDiskIndex(p_results[index], &(p_stats[index]));
                                 double exEndTime = threadws.getElapsedMs();
@@ -286,6 +286,14 @@ namespace SPTAG {
                     recall = COMMON::TruthSet::CalculateRecall<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, K, truthK, querySet, vectorSet, numQueries, nullptr, false, &MRR);
                     LOG(Helper::LogLevel::LL_Info, "Recall%d@%d: %f MRR@%d: %f\n", truthK, K, recall, K, MRR);
                 }
+
+                LOG(Helper::LogLevel::LL_Info, "\nComm Cost:\n");
+                PrintPercentiles<double, SPANN::SearchStats>(stats,
+                    [](const SPANN::SearchStats& ss) -> double
+                    {
+                        return ss.m_commCost;
+                    },
+                    "%.3lf");
 
                 LOG(Helper::LogLevel::LL_Info, "\nHead Elements Count:\n");
                 PrintPercentiles<double, SPANN::SearchStats>(stats,

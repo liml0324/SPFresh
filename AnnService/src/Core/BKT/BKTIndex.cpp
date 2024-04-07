@@ -253,6 +253,7 @@ namespace SPTAG
 
             while (!p_space.m_NGQueue.empty()) {
                 NodeDistPair gnode = p_space.m_NGQueue.pop();
+                p_space.m_popTime++;
                 SizeType tmpNode = gnode.node;
                 const SizeType* node = m_pGraph[tmpNode];
                 _mm_prefetch((const char*)node, _MM_HINT_T0);
@@ -329,7 +330,7 @@ namespace SPTAG
         namespace StaticDispatch
         {
             template <typename... Args>
-             bool AlwaysTrue(Args...)
+            bool AlwaysTrue(Args...)
             {
                 return true;
             }
@@ -431,7 +432,7 @@ namespace SPTAG
         }
 
         template<typename T>
-        ErrorCode Index<T>::SearchIndex(QueryResult& p_query, int& searchedVectorNumber, bool p_searchDeleted)
+        ErrorCode Index<T>::SearchIndex(QueryResult& p_query, int& searchedVectorNumber, int& commCost, bool p_searchDeleted)
         {
             if (!m_bReady) return ErrorCode::EmptyIndex;
 
@@ -452,6 +453,7 @@ namespace SPTAG
             }
 
             searchedVectorNumber = m_workspace->CheckedVectors();
+            commCost = m_workspace->m_popTime;
 
             return ErrorCode::Success;
         }

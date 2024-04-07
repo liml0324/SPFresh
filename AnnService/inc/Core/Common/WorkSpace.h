@@ -231,6 +231,8 @@ namespace SPTAG
                 m_iNumberOfTreeCheckedLeaves = 0;
                 m_iNumberOfCheckedLeaves = 0;
                 m_iMaxCheck = maxCheck;
+
+                m_popTime = 0;
             }
 
             void Initialize(va_list& arg)
@@ -252,6 +254,8 @@ namespace SPTAG
                 m_iNumberOfTreeCheckedLeaves = 0;
                 m_iNumberOfCheckedLeaves = 0;
                 m_iMaxCheck = maxCheck;
+
+                m_popTime = 0;
             }
 
             inline bool CheckAndSet(SizeType idx)
@@ -279,6 +283,8 @@ namespace SPTAG
             int m_iNumberOfTreeCheckedLeaves;
             int m_iNumberOfCheckedLeaves;
             int m_iMaxCheck;
+
+            int m_popTime;
 
             int m_acturalCheck;
 

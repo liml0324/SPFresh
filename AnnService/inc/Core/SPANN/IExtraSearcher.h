@@ -75,6 +75,8 @@ namespace SPTAG {
 
             int m_realElementsCount;
 
+            int m_commCost;
+
             std::chrono::steady_clock::time_point m_searchRequestTime;
 
             int m_threadID;
