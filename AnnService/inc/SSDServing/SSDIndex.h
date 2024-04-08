@@ -163,6 +163,65 @@ namespace SPTAG {
             }
 
             template <typename ValueType>
+            void SearchSequentialHeadIndex(SPANN::Index<ValueType>* p_index,
+                int p_numThreads,
+                std::vector<QueryResult>& p_results,
+                std::vector<SPANN::SearchStats>& p_stats,
+                int p_maxQueryCount, int p_internalResultNum)
+            {
+                int numQueries = min(static_cast<int>(p_results.size()), p_maxQueryCount);
+
+                std::atomic_size_t queriesSent(0);
+
+                std::vector<std::thread> threads;
+
+                LOG(Helper::LogLevel::LL_Info, "Searching HeadIndex: numThread: %d, numQueries: %d.\n", p_numThreads, numQueries);
+
+                Utils::StopW sw;
+
+                for (int i = 0; i < p_numThreads; i++) { threads.emplace_back([&, i]()
+                    {
+                        // Helper::SetThreadAffinity( ((i+1) * 4), threads[i], 0, 0);
+
+                        p_index->Initialize();
+
+                        Utils::StopW threadws;
+                        size_t index = 0;
+                        while (true)
+                        {
+                            index = queriesSent.fetch_add(1);
+                            if (index < numQueries)
+                            {
+                                if ((index & ((1 << 14) - 1)) == 0)
+                                {
+                                    LOG(Helper::LogLevel::LL_Info, "Sent %.2lf%%...\n", index * 100.0 / numQueries);
+                                }
+
+                                double startTime = threadws.getElapsedMs();
+                                p_index->GetMemoryIndex()->SearchIndex(p_results[index], p_stats[index].m_headElementsCount, p_stats[index].m_commCost);
+                                double endTime = threadws.getElapsedMs();
+                            }
+                            else
+                            {
+                                return;
+                            }
+                        }
+                    });
+                }
+                for (auto& thread : threads) { thread.join(); }
+
+                double sendingCost = sw.getElapsedSec();
+
+                LOG(Helper::LogLevel::LL_Info,
+                    "Finish HeadIndex sending in %.3lf seconds, actuallQPS is %.2lf, query count %u.\n",
+                    sendingCost,
+                    numQueries / sendingCost,
+                    static_cast<uint32_t>(numQueries));
+
+                for (int i = 0; i < numQueries; i++) { p_results[i].CleanQuantizedTarget(); }
+            }
+
+            template <typename ValueType>
             void Search(SPANN::Index<ValueType>* p_index)
             {
                 SPANN::Options& p_opts = *(p_index->GetOptions());
@@ -229,6 +288,40 @@ namespace SPTAG {
                     results[i].Reset();
                 }
 
+                LOG(Helper::LogLevel::LL_Info, "Start HeadIndex ANN Search...\n");
+
+                SearchSequentialHeadIndex(p_index, numThreads, results, stats, p_opts.m_queryCountLimit, internalResultNum);
+
+                LOG(Helper::LogLevel::LL_Info, "\nFinish HeadIndex ANN Search...\n");
+
+                std::string headTruthFile = p_opts.m_headTruth;
+                float headRecall = 0, headMRR = 0;
+                std::vector<std::set<SizeType>> headTruth;
+                if (!headTruthFile.empty())
+                {
+                    LOG(Helper::LogLevel::LL_Info, "Start loading TruthFile...\n");
+
+                    auto ptr = f_createIO();
+                    if (ptr == nullptr || !ptr->Initialize(headTruthFile.c_str(), std::ios::in | std::ios::binary)) {
+                        LOG(Helper::LogLevel::LL_Error, "Failed open truth file: %s\n", headTruthFile.c_str());
+                        exit(1);
+                    }
+                    int originalK = internalResultNum;
+                    COMMON::TruthSet::LoadTruth(ptr, headTruth, numQueries, originalK, internalResultNum, p_opts.m_truthType);
+                    char tmp[4];
+                    if (ptr->ReadBinary(4, tmp) == 4) {
+                        LOG(Helper::LogLevel::LL_Error, "Truth number is larger than query number(%d)!\n", numQueries);
+                    }
+
+                    headRecall = COMMON::TruthSet::CalculateRecall<ValueType>((p_index->GetMemoryIndex()).get(), results, headTruth, internalResultNum, internalResultNum, querySet, nullptr, numQueries, nullptr, false, &headMRR);
+                    LOG(Helper::LogLevel::LL_Info, "Head Recall%d@%d: %f MRR@%d: %f\n", internalResultNum, internalResultNum, headRecall, K, headMRR);
+                }
+
+                for (int i = 0; i < numQueries; ++i)
+                {
+                    (*((COMMON::QueryResultSet<ValueType>*)&results[i])).SetTarget(reinterpret_cast<ValueType*>(querySet->GetVector(i)), p_index->m_pQuantizer);
+                    results[i].Reset();
+                }
 
                 LOG(Helper::LogLevel::LL_Info, "Start ANN Search...\n");
 

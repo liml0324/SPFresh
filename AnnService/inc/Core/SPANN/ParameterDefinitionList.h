@@ -193,6 +193,7 @@ DefineSSDParameter(m_disableReassign, bool, false, "DisableReassign")
 DefineSSDParameter(m_searchDuringUpdate, bool, false, "SearchDuringUpdate")
 DefineSSDParameter(m_reassignK, int, 0, "ReassignK")
 DefineSSDParameter(m_virtualHead, bool, false, "VirtualHead")
+DefineSSDParameter(m_headTruth, std::string, "", "HeadTruth")
 
 // DSPANN
 DefineSSDParameter(m_dspann, bool, false, "DSPANN")

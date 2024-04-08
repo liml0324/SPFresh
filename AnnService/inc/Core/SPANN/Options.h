@@ -186,6 +186,8 @@ namespace SPTAG {
             std::string m_dspannCenters;
             int m_dspannTopK;
 
+            std::string m_headTruth;
+
 
             Options() {
 #define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) \
