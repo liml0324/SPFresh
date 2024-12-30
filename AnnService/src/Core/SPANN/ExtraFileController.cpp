@@ -127,40 +127,19 @@ void* FileIO::BlockController::InitializeFileIo(void* args) {
         // strcpy(filePath, "/home/lml/SPFreshTest/testfile");
     }
     if(stat(filePath, &st) != 0) {
-        std::ofstream file(filePath, std::ios::binary);
-        file.seekp(fileSize - 1);
-        file.write("", 1);
-        if(file.fail()) {
+        fd = open(filePath, O_CREAT | O_WRONLY, 0666);
+        if(fd == -1) {
             fprintf(stderr, "FileIO::BlockController::InitializeFileIo failed\n");
             // return nullptr;
             ctrl->m_fileIoThreadStartFailed = true;
-            fd = -1;
-            file.close();
-        } else {
-            file.close();
-            fd = open(filePath, O_RDWR | O_DIRECT);
-            if (fd == -1) {
-                auto err_str = strerror(errno);
-                fprintf(stderr, "open failed: %s\n", err_str);
-                ctrl->m_fileIoThreadStartFailed = true;
-            } else {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::InitializeFileIo: file %s created, fd=%d\n", filePath, fd);
-            }
         }
-    }
-    else {
-        if(st.st_size < fileSize) {
-            std::ofstream file(filePath, std::ios::binary | std::ios::app);
-            file.seekp(fileSize - 1);
-            file.write("", 1);
-            if(file.fail()) {
-                fprintf(stderr, "FileIO::BlockController::InitializeFileIo failed: Failed to create file\n");
+        else {
+            if (fallocate(fd, 0, 0, fileSize) == -1) {
+                fprintf(stderr, "FileIO::BlockController::InitializeFileIo failed: fallocate failed\n");
                 ctrl->m_fileIoThreadStartFailed = true;
                 fd = -1;
-                file.close();
-            }
-            else {
-                file.close();
+            } else {
+                close(fd);
                 fd = open(filePath, O_RDWR | O_DIRECT);
                 if (fd == -1) {
                     auto err_str = strerror(errno);
@@ -170,7 +149,36 @@ void* FileIO::BlockController::InitializeFileIo(void* args) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::InitializeFileIo: file %s created, fd=%d\n", filePath, fd);
                 }
             }
+        }
+    }
+    else {
+        auto actualFileSize = st.st_blocks * st.st_blksize;
+        if(actualFileSize < fileSize) {
+            fd = open(filePath, O_CREAT | O_WRONLY, 0666);
+            if(fd == -1) {
+                fprintf(stderr, "FileIO::BlockController::InitializeFileIo failed\n");
+                // return nullptr;
+                ctrl->m_fileIoThreadStartFailed = true;
+            }
+            else {
+                if (fallocate(fd, 0, 0, fileSize) == -1) {
+                    fprintf(stderr, "FileIO::BlockController::InitializeFileIo failed: fallocate failed\n");
+                    ctrl->m_fileIoThreadStartFailed = true;
+                    fd = -1;
+                } else {
+                    close(fd);
+                    fd = open(filePath, O_RDWR | O_DIRECT);
+                    if (fd == -1) {
+                        auto err_str = strerror(errno);
+                        fprintf(stderr, "open failed: %s\n", err_str);
+                        ctrl->m_fileIoThreadStartFailed = true;
+                    } else {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::InitializeFileIo: file %s created, fd=%d\n", filePath, fd);
+                    }
+                }
+            }
         } else {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::InitializeFileIo: file has been created with enough space.\n", filePath, fd);
             fd = open(filePath, O_RDWR | O_DIRECT);
             if (fd == -1) {
                 auto err_str = strerror(errno);
