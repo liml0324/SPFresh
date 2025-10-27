@@ -338,16 +338,19 @@ namespace SPTAG::SPANN {
 
         bool CheckIsNeedReassign(VectorIndex* p_index, std::vector<SizeType>& newHeads, ValueType* data, SizeType splitHead, float_t headToSplitHeadDist, float_t currentHeadDist, bool isInSplitHead, SizeType currentHead)
         {
-
+            // splitHead是分裂前的head
             float_t splitHeadDist = p_index->ComputeDistance(data, p_index->GetSample(splitHead));
-
+            // 如果是分裂前的posting中的节点，且分裂后的新head距离更近，就不用reassign
             if (isInSplitHead) {
                 if (splitHeadDist >= currentHeadDist) return false;
             }
             else {
                 float_t newHeadDist_1 = p_index->ComputeDistance(data, p_index->GetSample(newHeads[0]));
                 float_t newHeadDist_2 = p_index->ComputeDistance(data, p_index->GetSample(newHeads[1]));
+                // 否则（不是分裂前posting中的节点，而是附近的posting中的节点
+                // 到原本的head还更近，肯定不用reassign
                 if (splitHeadDist <= newHeadDist_1 && splitHeadDist <= newHeadDist_2) return false;
+                // 到自己所在的中心比两个新中心更近，肯定不用reassign
                 if (currentHeadDist <= newHeadDist_1 && currentHeadDist <= newHeadDist_2) return false;
             }
             return true;
@@ -478,6 +481,7 @@ namespace SPTAG::SPANN {
 
                 std::string postingList;
                 auto splitGetBegin = std::chrono::high_resolution_clock::now();
+                // 读取需要分裂的posting list
                 if (db->Get(headID, &postingList) != ErrorCode::Success) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Split fail to get oversized postings\n");
                     exit(0);
@@ -496,6 +500,7 @@ namespace SPTAG::SPANN {
                 std::vector<int> localIndices(postVectorNum);
                 int index = 0;
                 uint8_t* vectorId = postingP;
+                // 去掉被删除的和过时的向量
                 for (int j = 0; j < postVectorNum; j++, vectorId += m_vectorInfoSize)
                 {
                     //LOG(Helper::LogLevel::LL_Info, "vector index/total:id: %d/%d:%d\n", j, m_postingSizes[headID].load(), *(reinterpret_cast<int*>(vectorId)));
@@ -511,9 +516,11 @@ namespace SPTAG::SPANN {
                 }
                 // double gcEndTime = sw.getElapsedMs();
                 // m_splitGcCost += gcEndTime;
+                // 这里相当于是GC，去掉被删除的和过时的向量之后直接写回
                 if (m_opt->m_inPlace || (!preReassign && index < m_postingSizeLimit))
                 {
                     char* ptr = (char*)(postingList.c_str());
+                    // 去掉被删除的和过时的向量
                     for (int j = 0; j < index; j++, ptr += m_vectorInfoSize)
                     {
                         if (j == localIndices[j]) continue;
@@ -553,6 +560,7 @@ namespace SPTAG::SPANN {
                 m_stat.m_clusteringCost += elapsedMSeconds;
                 // int numClusters = ClusteringSPFresh(smallSample, localIndices, 0, localIndices.size(), args, 10, false, m_opt->m_virtualHead);
                 // exit(0);
+                // 可能出现聚类数量小于2的情况，直接不分裂写回
                 if (numClusters <= 1)
                 {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Cluserting Failed (The same vector), Only Keep one\n");
@@ -584,11 +592,14 @@ namespace SPTAG::SPANN {
                     
                     newPostingLists[k].resize(args.counts[k] * m_vectorInfoSize);
                     char* ptr = (char*)(newPostingLists[k].c_str());
+                    // 前面的聚类函数会直接重排postingList
                     for (int j = 0; j < args.counts[k]; j++, ptr += m_vectorInfoSize)
                     {
                         memcpy(ptr, postingList.c_str() + localIndices[first + j] * m_vectorInfoSize, m_vectorInfoSize);
                         //Serialize(ptr, localIndicesInsert[localIndices[first + j]], localIndicesInsertVersion[localIndices[first + j]], smallSample[localIndices[first + j]]);
                     }
+                    // 如果新的聚类中心和原本的中心很近，则直接用原来的headID
+                    // theSameHead是一个标记，不能2个聚类都用原本的中心
                     if (!theSameHead && p_index->ComputeDistance(args.centers + k * args._D, p_index->GetSample(headID)) < Epsilon) {
                         newHeadsID.push_back(headID);
                         newHeadVID = headID;
@@ -605,6 +616,7 @@ namespace SPTAG::SPANN {
                     }
                     else {
                         int begin, end = 0;
+                        // 这里begin和end都是引用，函数执行完会将begin和end改为新插入的head在head列表中的位置
                         p_index->AddIndexId(args.centers + k * args._D, 1, m_opt->m_dim, begin, end);
                         newHeadVID = begin;
                         newHeadsID.push_back(begin);
@@ -617,6 +629,7 @@ namespace SPTAG::SPANN {
                         elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(splitPutEnd - splitPutBegin).count();
                         m_stat.m_putCost += elapsedMSeconds;
                         auto updateHeadBegin = std::chrono::high_resolution_clock::now();
+                        // 上面的AddIndexId只分配了邻居空间，这里才真正Refine Graph，加入邻居
                         p_index->AddIndexIdx(begin, end);
                         auto updateHeadEnd = std::chrono::high_resolution_clock::now();
                         elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(updateHeadEnd - updateHeadBegin).count();
@@ -632,7 +645,9 @@ namespace SPTAG::SPANN {
                     first += args.counts[k];
                     m_postingSizes.UpdateSize(newHeadVID, args.counts[k]);
                 }
+                // 没有复用原本的head，就要删除
                 if (!theSameHead) {
+                    // 这里只加入了删除列表，没有实际删除
                     p_index->DeleteIndex(headID);
                     m_postingSizes.UpdateSize(headID, 0);
                 }
@@ -643,6 +658,8 @@ namespace SPTAG::SPANN {
                 m_splitList.erase(headID);
             }
             m_stat.m_splitNum++;
+            // 如果设置了reassign，则对新分裂的所有postinglist和原posting附近的K个（根据配置文件决定）posting
+            // 进行reassign
             if (reassign) {
                 auto reassignScanBegin = std::chrono::high_resolution_clock::now();
 
@@ -687,6 +704,7 @@ namespace SPTAG::SPANN {
                 size_t postVectorNum = currentPostingList.size() / m_vectorInfoSize;
                 int currentLength = 0;
                 uint8_t* vectorId = postingP;
+                // 去掉被删除的和过时的向量
                 for (int j = 0; j < postVectorNum; j++, vectorId += m_vectorInfoSize)
                 {
                     int VID = *((int*)(vectorId));
@@ -698,6 +716,8 @@ namespace SPTAG::SPANN {
                 }
                 int totalLength = currentLength;
 
+                // 如果实际长度比合并阈值大（因为是异步合并，可能等待合并时会被插入），就直接写回
+                // 进行GC后的新postingLisk并返回
                 if (currentLength > m_mergeThreshold)
                 {
                     m_postingSizes.UpdateSize(headID, currentLength);
@@ -720,9 +740,11 @@ namespace SPTAG::SPANN {
                     BasicResult* queryResult = queryResults.GetResult(i);
                     int nextLength = m_postingSizes.GetSize(queryResult->VID);
                     tbb::concurrent_hash_map<SizeType, SizeType>::const_accessor headIDAccessor;
+                    // 要保证目标postingList没有被合并，且两者长度和小于posting长度限制
                     if (currentLength + nextLength < m_postingSizeLimit && !m_mergeList.find(headIDAccessor, queryResult->VID))
                     {
                         {
+                            // 这里要确保两者的哈希函数不同，防止重复加锁
                             std::unique_lock<std::shared_timed_mutex> anotherLock(m_rwLocks[queryResult->VID], std::defer_lock);
                             // SPTAGLIB_LOG(Helper::LogLevel::LL_Info,"Locked: %d, to be lock: %d\n", headID, queryResult->VID);
                             if (m_rwLocks.hash_func(queryResult->VID) != m_rwLocks.hash_func(headID)) anotherLock.lock();
@@ -736,6 +758,7 @@ namespace SPTAG::SPANN {
                             postVectorNum = nextPostingList.size() / m_vectorInfoSize;
                             nextLength = 0;
                             vectorId = postingP;
+                            // 去冗余
                             for (int j = 0; j < postVectorNum; j++, vectorId += m_vectorInfoSize)
                             {
                                 int VID = *((int*)(vectorId));
@@ -747,6 +770,7 @@ namespace SPTAG::SPANN {
                                 }
                                 nextLength++;
                             }
+                            // 把小的posting合并到大的里面
                             if (currentLength > nextLength) 
                             {
                                 p_index->DeleteIndex(queryResult->VID);
@@ -773,6 +797,7 @@ namespace SPTAG::SPANN {
                         lock.unlock();
                         m_mergeLock.unlock();
 
+                        // 这里只reassign被移动的向量，并且如果新的head离该向量更近，就不进行reassign
                         if (reassign) 
                         {
                             /* ReAssign */
@@ -811,6 +836,7 @@ namespace SPTAG::SPANN {
                         return ErrorCode::Success;
                     }
                 }
+                // 这里是处理每一个候选posting都不能被合并的情况，将进行GC后的posting直接写回
                 m_postingSizes.UpdateSize(headID, currentLength);
                 if (db->Put(headID, mergedPostingList) != ErrorCode::Success) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Merge Fail to write back postings\n");
@@ -865,6 +891,8 @@ namespace SPTAG::SPANN {
             m_splitThreadPool->add(curJob);
         }
 
+        // 这个是给Split用的，会对postingLists中存的2个postingList中的向量都调用异步的reassign
+        // 还会根据reassignK对原来的head周围最近的K个postingList进行reassign
         ErrorCode CollectReAssign(VectorIndex* p_index, SizeType headID, std::vector<std::string>& postingLists, std::vector<SizeType>& newHeadsID) {
             auto headVector = reinterpret_cast<const ValueType*>(p_index->GetSample(headID));
             std::vector<float> newHeadsDist;
@@ -881,6 +909,7 @@ namespace SPTAG::SPANN {
                     // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "VID: %d, Head: %d\n", vid, newHeadsID[i]);
                     uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(int)));
                     ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
+                    // 对于没有被reassign过，且没过时或被删除的节点，判断需要reassign后进行reassign
                     if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
                         m_stat.m_reAssignScanNum++;
                         float dist = p_index->ComputeDistance(p_index->GetSample(newHeadsID[i]), vector);
@@ -891,6 +920,7 @@ namespace SPTAG::SPANN {
                     }
                 }
             }
+            // 对附近的K个posting进行reassign
             if (m_opt->m_reassignK > 0) {
                 std::vector<SizeType> HeadPrevTopK;
                 newHeadsDist.clear();
@@ -904,6 +934,7 @@ namespace SPTAG::SPANN {
                     auto vid = queryResults[i].VID;
                     if (vid == -1) break;
 
+                    // 这里为什么要去重？哪里有可能会重复吗？
                     if (find(newHeadsID.begin(), newHeadsID.end(), vid) == newHeadsID.end()) {
                         HeadPrevTopK.push_back(vid);
                         newHeadsID.push_back(vid);
@@ -919,6 +950,7 @@ namespace SPTAG::SPANN {
                 auto elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(reassignScanIOEnd - reassignScanIOBegin).count();
                 m_stat.m_reassignScanIOCost += elapsedMSeconds;
 
+                // 对每一个posting中的每一个vector做前面的判断和reassign
                 for (int i = 0; i < postingLists.size(); i++) {
                     auto& postingList = postingLists[i];
                     size_t postVectorNum = postingList.size() / m_vectorInfoSize;
@@ -957,6 +989,9 @@ namespace SPTAG::SPANN {
                     break;
                 }
                 // RNG Check.
+                // 这里是为了让候选节点分布在不同方向上
+                // 将新的候选节点到原有候选节点的距离，和新的候选节点到需要被reassign的目标向量（query）的距离进行比较，如果小于等于说明两者方向过于接近，直接舍去
+                // 这里有一个rngFactor，是为了放松RNG Check的限制，选择更多的候选节点
                 bool rngAccpeted = true;
                 for (int j = 0; j < replicaCount; ++j)
                 {
@@ -970,8 +1005,11 @@ namespace SPTAG::SPANN {
                 }
                 if (!rngAccpeted) continue;
                 selections[replicaCount].node = queryResult->VID;
+                // p_fullID是目标向量（query）的ID
                 selections[replicaCount].tonode = p_fullID;
                 selections[replicaCount].distance = queryResult->Dist;
+                // checkHeadID一般被传入的是原本所在的headID
+                // 这里如果原本的headID也在候选列表中，就直接返回false，表示不需要reassign
                 if (selections[replicaCount].node == checkHeadID) {
                     return false;
                 }
@@ -980,6 +1018,7 @@ namespace SPTAG::SPANN {
             return true;
         }
 
+        // 把appendPosting中的appendNum个向量加在headID对应的posting后面
         ErrorCode Append(VectorIndex* p_index, SizeType headID, int appendNum, std::string& appendPosting, int reassignThreshold = 0)
         {
             auto appendBegin = std::chrono::high_resolution_clock::now();
@@ -992,6 +1031,8 @@ namespace SPTAG::SPANN {
             }
 
         checkDeleted:
+            // 如果headID已经被删除的，就把所有还没过时的向量进行reassign
+            // 这个是Undefined的行为，应该主要是后面错误处理用的
             if (!p_index->ContainSample(headID)) {
                 for (int i = 0; i < appendNum; i++)
                 {
@@ -1016,6 +1057,7 @@ namespace SPTAG::SPANN {
                     goto checkDeleted;
                 }
                 auto appendIOBegin = std::chrono::high_resolution_clock::now();
+                // 使用db的Merge操作进行追加写
                 if (db->Merge(headID, appendPosting) != ErrorCode::Success) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Merge failed! Posting Size:%d, limit: %d\n", m_postingSizes.GetSize(headID), m_postingSizeLimit);
                     GetDBStats();
@@ -1033,12 +1075,16 @@ namespace SPTAG::SPANN {
                 //     GetDBStats();
                 //     exit(1);
                 // }
+                // reassignThreshold用来判断Append是否是Reassign调用的
+                // 如果是Reassign调用的，则进行同步的Split，否则进行异步的Split
+                // 这里reassign允许posting长度超过一点，应该是为了避免频繁的reassign导致Split
                 if (!reassignThreshold) SplitAsync(p_index, headID);
                 else Split(p_index, headID, !m_opt->m_disableReassign);
                 // SplitAsync(p_index, headID);
             }
             auto appendEnd = std::chrono::high_resolution_clock::now();
             double elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(appendEnd - appendBegin).count();
+            // reassign不需要记录cost，应该是因为reassign的cost有单独的记录
             if (!reassignThreshold) {
                 m_stat.m_appendTaskNum++;
                 m_stat.m_appendIOCost += appendIOSeconds;
@@ -1050,6 +1096,8 @@ namespace SPTAG::SPANN {
             return ErrorCode::Success;
         }
         
+        // 真正的Reassign操作
+        // 这里的HeadPrev是否存在并不影响Reassign的进行，如果不存在，则Reassign相当于简单的插入操作
         void Reassign(VectorIndex* p_index, std::shared_ptr<std::string> vectorInfo, SizeType HeadPrev)
         {
             SizeType VID = *((SizeType*)vectorInfo->c_str());
@@ -1075,10 +1123,15 @@ namespace SPTAG::SPANN {
             // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Need ReAssign\n");
             if (isNeedReassign && m_versionMap->GetVersion(VID) == version) {
                 // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Update Version: VID: %d, version: %d, current version: %d\n", VID, version, m_versionMap.GetVersion(VID));
+                // reassign过后需要更新version，这样之前放在其他posting中的replica就会过时
+                // 下一次Split或Merge操作在GC时会删除过时的replica
                 m_versionMap->IncVersion(VID, &version);
                 (*vectorInfo)[sizeof(VID)] = version;
 
                 //LOG(Helper::LogLevel::LL_Info, "Reassign: oldVID:%d, replicaCount:%d, candidateNum:%d, dist0:%f\n", oldVID, replicaCount, i, selections[0].distance);
+                // 将向量加到被选定的分区中
+                // 这里还要检查一次version，可能是考虑并发问题
+                // 如果出现Append返回Undefined就直接break，因为Append会重新触发Reassign
                 for (int i = 0; i < replicaCount && m_versionMap->GetVersion(VID) == version; i++) {
                     //LOG(Helper::LogLevel::LL_Info, "Reassign: headID :%d, oldVID:%d, newVID:%d, posting length: %d, dist: %f, string size: %d\n", headID, oldVID, VID, m_postingSizes[headID].load(), selections[i].distance, newPart.size());
                     if (ErrorCode::Undefined == Append(p_index, selections[i].node, 1, *vectorInfo, 3)) {
@@ -1125,6 +1178,7 @@ namespace SPTAG::SPANN {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Initialize Error\n");
                     exit(1);
                 }
+                // m_index里的NumSamples在进入该函数前就已经被设置好了
                 int totalPostingNum = m_index->GetNumSamples();
 
                 m_postingSizes.Initialize((SizeType)(totalPostingNum), m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
@@ -1132,6 +1186,7 @@ namespace SPTAG::SPANN {
                 std::vector<std::thread> threads;
                 std::atomic_size_t vectorsSent(0);
 
+                // 多线程将posting拷贝到KV存储中
                 auto func = [&]()
                 {
                     Initialize();
@@ -1185,6 +1240,8 @@ namespace SPTAG::SPANN {
                 for (auto& thread : threads) { thread.join(); }
             } 
 
+            // Update模式下需要Split和Reassign线程池
+            // 实际上这里的m_splitThreadPool同时负责Split和Merge
             if (m_opt->m_update) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize thread pools, append: %d, reassign %d\n", m_opt->m_appendThreadNum, m_opt->m_reassignThreadNum);
                 m_splitThreadPool = std::make_shared<SPDKThreadPool>();
@@ -1239,6 +1296,7 @@ namespace SPTAG::SPANN {
             return true;
         }
 
+        // 这个函数用来在已经在内存中的图索引中找到候选posting的情况下，将posting读取上来进行搜索
         virtual void SearchIndex(ExtraWorkSpace* p_exWorkSpace,
             QueryResult& p_queryResults,
             std::shared_ptr<VectorIndex> p_index,
@@ -1341,6 +1399,7 @@ namespace SPTAG::SPANN {
                 return false;
             }
 
+            // 读取head vector ids
             if (fileexists((m_opt->m_indexDirectory + FolderSep + m_opt->m_headIDFile).c_str()))
             {
                 auto ptr = SPTAG::f_createIO();
@@ -1357,6 +1416,7 @@ namespace SPTAG::SPANN {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loaded %u Vector IDs\n", static_cast<uint32_t>(headVectorIDS.size()));
             }
 
+            // 获取完整的向量数量
             SizeType fullCount = 0;
             {
                 auto fullVectors = p_reader->GetVectorSet();
@@ -1396,6 +1456,7 @@ namespace SPTAG::SPANN {
                     auto fullVectors = p_reader->GetVectorSet(start, end);
                     if (m_opt->m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized()) fullVectors->Normalize(m_opt->m_iSSDNumberOfThreads);
 
+                    // 如果分多个batch，则处理start到end间的vid
                     if (p_opt.m_batches > 1) {
                         if (selections.LoadBatch(static_cast<size_t>(start) * p_opt.m_replicaCount, static_cast<size_t>(end) * p_opt.m_replicaCount) != ErrorCode::Success)
                         {
@@ -1410,6 +1471,8 @@ namespace SPTAG::SPANN {
                         emptySet = headVectorIDS;
                     }
 
+                    // 选取不在headVectorIDS中的vid（？
+                    // 没明白这一步有什么用，这个samples好像也没起到任何作用
                     int sampleNum = 0;
                     for (int j = start; j < end && sampleNum < sampleSize; j++)
                     {
@@ -1428,6 +1491,7 @@ namespace SPTAG::SPANN {
                     p_headIndex->ApproximateRNG(fullVectors, emptySet, candidateNum, selections.m_selections.data(), m_opt->m_replicaCount, numThreads, m_opt->m_gpuSSDNumTrees, m_opt->m_gpuSSDLeafSize, m_opt->m_rngFactor, m_opt->m_numGPUs);
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Batch %d finished!\n", i);
 
+                    // 对非headID的向量，记录postingListSize和replicaCount
                     for (SizeType j = start; j < end; j++) {
                         replicaCount[j] = 0;
                         size_t vecOffset = j * (size_t)m_opt->m_replicaCount;
@@ -1475,6 +1539,7 @@ namespace SPTAG::SPANN {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Posting size limit: %d\n", postingSizeLimit);
 
 
+            // 记录replicaCount的分布情况
             {
                 std::vector<int> replicaCountDist(m_opt->m_replicaCount + 1, 0);
                 for (int i = 0; i < replicaCount.size(); ++i)
@@ -1491,7 +1556,7 @@ namespace SPTAG::SPANN {
             }
 
     #pragma omp parallel for schedule(dynamic)
-            for (int i = 0; i < postingListSize.size(); ++i)
+            for (int i = 0; i < postingListSize.size(); ++i) // 对postingList进行裁剪，超过大小限制的减少replicaCount
             {
                 if (postingListSize[i] <= postingSizeLimit) continue;
 

@@ -463,6 +463,10 @@ namespace SPTAG::SPANN {
             } else {
                 m_pBlockMapping.Initialize(0, 1, blockSize, capacity);
             }
+            m_writeCount.resize(m_pBlockMapping.R());
+            m_readCount.resize(m_pBlockMapping.R());
+            m_mergeCount.resize(m_pBlockMapping.R());
+
             for (int i = 0; i < bufferSize; i++) {
                 m_buffer.push((uintptr_t)(new AddressType[m_blockLimit]));
             }
@@ -574,6 +578,7 @@ namespace SPTAG::SPANN {
             }
             if (key >= r) return ErrorCode::Fail;
 
+            m_readCount[key]++;
             if (m_fileIoUseCache) {
                 auto size = ((AddressType*)At(key))[0];
                 value->resize(size);
@@ -619,6 +624,7 @@ namespace SPTAG::SPANN {
             }
             if (key >= r) return ErrorCode::Fail;
 
+            m_readCount[key]++;
             if (m_fileIoUseCache) {
                 auto size = ((AddressType*)At(key))[0];
                 value->resize(size);
@@ -669,6 +675,7 @@ namespace SPTAG::SPANN {
             values->resize(keys.size());
             int i = 0;
             for (SizeType key : keys) {
+                m_readCount[key]++;
                 if (m_fileIoUseLock) {
                     m_updateMutex.lock_shared();
                     r = m_pBlockMapping.R();
@@ -768,9 +775,13 @@ namespace SPTAG::SPANN {
                 delta = key + 1 - m_pBlockMapping.R();
                 if (delta > 0) {
                     m_pBlockMapping.AddBatch(delta);
+                    m_readCount.resize(m_readCount.size() + delta, 0);
+                    m_writeCount.resize(m_writeCount.size() + delta, 0);
+                    m_mergeCount.resize(m_mergeCount.size() + delta, 0);
                 }
                 m_updateMutex.unlock();
             }
+            m_writeCount[key]++;
 
             if (m_fileIoUseCache) {
                 m_pShardedLRUCache->put(key, (void *)(value.data()), value.size());
@@ -920,6 +931,7 @@ namespace SPTAG::SPANN {
             
             int64_t* postingSize = (int64_t*)At(key);
 
+            m_mergeCount[key]++;
             if (m_fileIoUseCache) {
                 m_pShardedLRUCache->merge(key, (void *)(value.data()), value.size());
             }
@@ -1041,6 +1053,30 @@ namespace SPTAG::SPANN {
             m_pBlockController.IOStatistics();
         }
 
+        ErrorCode PrintHotColdStat() {
+            std::string filePath = "hotcold" + std::to_string(m_hotColdStatNo) + ".txt";
+            m_hotColdStatNo++;
+            std::ofstream fout(filePath);
+            if (!fout.is_open()) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Print hot/cold stat: Failed to open file %s\n", filePath.c_str());
+                return ErrorCode::Fail;
+            }
+            fout << "Read Stat:" << std::endl;
+            for (int i = 0; i < m_readCount.size(); i++) {
+                fout << i << " " << m_readCount[i] << std::endl;
+            }
+            fout << "Write Stat:" << std::endl;
+            for (int i = 0; i < m_writeCount.size(); i++) {
+                fout << i << " " << m_writeCount[i] << std::endl;
+            }
+            fout << "Merge Stat:" << std::endl;
+            for (int i = 0; i < m_mergeCount.size(); i++) {
+                fout << i << " " << m_mergeCount[i] << std::endl;
+            }
+            fout.close();
+            return ErrorCode::Success;
+        }
+
         ErrorCode Load(std::string path, SizeType blockSize, SizeType capacity) {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load mapping From %s\n", path.c_str());
             auto ptr = f_createIO();
@@ -1079,6 +1115,9 @@ namespace SPTAG::SPANN {
                 }
             }
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save mapping (%d,%d) Finish!\n", CR, m_blockLimit);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin printing hot/cold stat\n");
+            if (PrintHotColdStat() == ErrorCode::Success)
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "End printing hot/cold stat\n");
             return ErrorCode::Success;
         }
 
@@ -1140,6 +1179,12 @@ namespace SPTAG::SPANN {
         std::string m_mappingPath;
         SizeType m_blockLimit;
         COMMON::Dataset<uintptr_t> m_pBlockMapping;
+
+        std::vector<int64_t> m_writeCount;
+        std::vector<int64_t> m_readCount;
+        std::vector<int64_t> m_mergeCount;
+        int m_hotColdStatNo = 0;
+
         SizeType m_bufferLimit;
         tbb::concurrent_queue<uintptr_t> m_buffer;
 

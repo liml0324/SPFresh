@@ -128,9 +128,11 @@ namespace SPTAG
             {
             }
 
+            // 这个函数应该主要是设置每个文件的读写Handler，并加载每个文件中的元数据信息
             virtual bool LoadIndex(Options& p_opt, COMMON::VersionLabel& p_versionMap, std::shared_ptr<std::uint64_t> m_vectorTranslateMap,  std::shared_ptr<VectorIndex> m_index) {
                 m_extraFullGraphFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
                 std::string curFile = m_extraFullGraphFile;
+                //Index不需要存版本号，所以元数据只有一个int（VID）
                 p_opt.m_searchPostingPageLimit = max(p_opt.m_searchPostingPageLimit, static_cast<int>((p_opt.m_postingVectorLimit * (p_opt.m_dim * sizeof(ValueType) + sizeof(int)) + PageSize - 1) / PageSize));
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load index with posting page limit:%d\n", p_opt.m_searchPostingPageLimit);
                 do {
@@ -872,6 +874,7 @@ namespace SPTAG
                 int m_totalDocumentCount;
                 int m_listPageOffset;
 
+                // 这里应该是整个file对应的元数据
                 if (ptr->ReadBinary(sizeof(m_listCount), reinterpret_cast<char*>(&m_listCount)) != sizeof(m_listCount)) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                     throw std::runtime_error("Failed read file in LoadingHeadInfo");
@@ -895,6 +898,7 @@ namespace SPTAG
                     throw std::runtime_error("DataDimension and ValueType don't match in LoadingHeadInfo");
                 }
 
+                // 在listInfos后面写入
                 size_t totalListCount = p_listInfos.size();
                 p_listInfos.resize(totalListCount + m_listCount);
 
@@ -905,6 +909,7 @@ namespace SPTAG
                 size_t biglistCount = 0;
                 size_t biglistElementCount = 0;
                 int pageNum;
+                // 读取所有list info
                 for (int i = 0; i < m_listCount; ++i)
                 {
                     ListInfo* listInfo = &(p_listInfos[totalListCount + i]);
@@ -958,6 +963,7 @@ namespace SPTAG
                     }
                 }
 
+                // 这里在读取compressor相关的信息
                 if (m_enableDataCompression && m_enableDictTraining)
                 {
                     size_t dictBufferSize;

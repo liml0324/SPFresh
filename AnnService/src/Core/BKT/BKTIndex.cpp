@@ -659,6 +659,7 @@ namespace SPTAG
 
                 if (p_dimension != GetFeatureDim()) return ErrorCode::DimensionSizeMismatch;
 
+                // 添加失败则回滚DataSet大小
                 if (m_pSamples.AddBatch(p_vectorNum, (const T*)p_data) != ErrorCode::Success || 
                     m_pGraph.AddBatch(p_vectorNum) != ErrorCode::Success || 
                     m_deletedID.AddBatch(p_vectorNum) != ErrorCode::Success) {
