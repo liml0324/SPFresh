@@ -6,13 +6,26 @@ set(Zstd ${PROJECT_SOURCE_DIR}/ThirdParty/zstd)
 set(Spdk ${PROJECT_SOURCE_DIR}/ThirdParty/spdk/build)
 set(Dpdk ${PROJECT_SOURCE_DIR}/ThirdParty/spdk/dpdk/build)
 set(IsalLCrypto ${PROJECT_SOURCE_DIR}/ThirdParty/isal-l_crypto/.libs/libisal_crypto.a)
+set(LeoFS ${PROJECT_SOURCE_DIR}/ThirdParty/fs_demo/target/release)
 set(SpdkLibPrefix ${Spdk}/lib/libspdk_)
 set(DpdkLibPrefix ${Dpdk}/lib/librte_)
 set(SPDK_LIBRARIES -Wl,--whole-archive ${SpdkLibPrefix}bdev_nvme.a ${SpdkLibPrefix}bdev.a ${SpdkLibPrefix}nvme.a ${SpdkLibPrefix}vfio_user.a ${SpdkLibPrefix}sock.a ${SpdkLibPrefix}dma.a ${SpdkLibPrefix}notify.a ${SpdkLibPrefix}accel.a ${SpdkLibPrefix}event_bdev.a ${SpdkLibPrefix}event_accel.a ${SpdkLibPrefix}vmd.a ${SpdkLibPrefix}event_vmd.a ${SpdkLibPrefix}event_sock.a ${SpdkLibPrefix}event_iobuf.a ${SpdkLibPrefix}event.a ${SpdkLibPrefix}env_dpdk.a ${SpdkLibPrefix}log.a ${SpdkLibPrefix}thread.a ${SpdkLibPrefix}rpc.a ${SpdkLibPrefix}init.a ${SpdkLibPrefix}jsonrpc.a ${SpdkLibPrefix}json.a ${SpdkLibPrefix}trace.a ${SpdkLibPrefix}util.a ${DpdkLibPrefix}mempool.a ${DpdkLibPrefix}mempool_ring.a ${DpdkLibPrefix}eal.a ${DpdkLibPrefix}ring.a ${DpdkLibPrefix}telemetry.a ${DpdkLibPrefix}bus_pci.a ${DpdkLibPrefix}kvargs.a ${DpdkLibPrefix}pci.a -Wl,--no-whole-archive dl rt isal ${IsalLCrypto} uuid)
+Set(LeoFS_LIBRARIES ${LeoFS}/libleofs_cffi.so)
+
+set(TBB_ROOT $ENV{HOME}/.local)
+set(TBB_INCLUDE_DIRS ${TBB_ROOT}/include)
+set(TBB_LIBRARIES ${TBB_ROOT}/lib64/libtbb.so)
+include_directories(${TBB_INCLUDE_DIRS})
+link_directories(${TBB_ROOT}/lib64)
+
+message(STATUS "TBB_ROOT: ${TBB_ROOT}")
+message(STATUS "TBB_INCLUDE_DIRS: ${TBB_INCLUDE_DIRS}")
+message(STATUS "TBB_LIBRARIES: ${TBB_LIBRARIES}")
 
 include_directories(${AnnService})
 include_directories(${Zstd}/lib)
-include_directories(${Spdk}/include)
+# include_directories(${Spdk}/include)
+include_directories(${LeoFS})
 
 file(GLOB_RECURSE HDR_FILES ${AnnService}/inc/Core/*.h  ${AnnService}/inc/Helper/*.h)
 file(GLOB_RECURSE SRC_FILES ${AnnService}/src/Core/*.cpp ${AnnService}/src/Helper/*.cpp)
@@ -22,12 +35,16 @@ list(REMOVE_ITEM HDR_FILES
     ${AnnService}/inc/Core/Common/SIMDUtils.h 
     ${AnnService}/inc/Core/Common/InstructionUtils.h
     ${AnnService}/inc/Core/Common/CommonUtils.h
+    ${AnnService}/inc/Core/SPANN/ExtraSPDKController.h
+    ${AnnService}/inc/Core/SPANN/ExtraRocksDBController.h
     )
 
 list(REMOVE_ITEM SRC_FILES
     ${AnnService}/src/Core/Common/DistanceUtils.cpp
     ${AnnService}/src/Core/Common/SIMDUtils.cpp
     ${AnnService}/src/Core/Common/InstructionUtils.cpp
+    ${AnnService}/src/Core/SPANN/ExtraSPDKController.cpp
+    ${AnnService}/src/Core/SPANN/ExtraRocksDBController.cpp
     )
 
 add_library (DistanceUtils STATIC 
@@ -44,29 +61,31 @@ if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
     target_compile_options(DistanceUtils PRIVATE -mavx2 -mavx -msse -msse2 -mavx512f -mavx512bw -mavx512dq -fPIC)
 endif()
 
-find_package(RocksDB CONFIG)
-if((DEFINED RocksDB_DIR) AND RocksDB_DIR)
-    list(APPEND RocksDB_LIBRARIES RocksDB::rocksdb)
-    find_package(uring)
-    set(uring_LIBRARIES "")
-    message (STATUS "Found RocksDB ${RocksDB_VERSION}")
-    message (STATUS "RocksDB: ${RocksDB_DIR}")
-else()
-    set(RocksDB_LIBRARIES "")
-    set(uring_LIBRARIES "")
-    message (FATAL_ERROR "Could not find RocksDB!")
-endif()
+# find_package(RocksDB CONFIG)
+# if((DEFINED RocksDB_DIR) AND RocksDB_DIR)
+#     list(APPEND RocksDB_LIBRARIES RocksDB::rocksdb)
+#     find_package(uring)
+#     set(uring_LIBRARIES "")
+#     message (STATUS "Found RocksDB ${RocksDB_VERSION}")
+#     message (STATUS "RocksDB: ${RocksDB_DIR}")
+# else()
+#     set(RocksDB_LIBRARIES "")
+#     set(uring_LIBRARIES "")
+#     message (FATAL_ERROR "Could not find RocksDB!")
+# endif()
 
-find_package(TBB REQUIRED)
-if (TBB_FOUND)
-    message (STATUS "Found TBB")
-endif()
+# find_package(TBB REQUIRED)
+# if (TBB_FOUND)
+#     message (STATUS "Found TBB")
+# endif()
 
 add_library (SPTAGLib SHARED ${SRC_FILES} ${HDR_FILES})
 # target_link_libraries (SPTAGLib DistanceUtils ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_shared ${NUMA_LIBRARY} tbb ${SPDK_LIBRARIES})
-target_link_libraries (SPTAGLib DistanceUtils ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_shared ${NUMA_LIBRARY} tbb)
+# target_link_libraries (SPTAGLib DistanceUtils ${uring_LIBRARIES} libzstd_shared ${NUMA_LIBRARY} tbb)
+target_link_libraries (SPTAGLib DistanceUtils ${uring_LIBRARIES} libzstd_shared ${NUMA_LIBRARY} ${TBB_LIBRARIES})
 add_library (SPTAGLibStatic STATIC ${SRC_FILES} ${HDR_FILES})
-target_link_libraries (SPTAGLibStatic DistanceUtils ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_static ${NUMA_LIBRARY_STATIC} tbb ${SPDK_LIBRARIES})
+# target_link_libraries (SPTAGLibStatic DistanceUtils ${uring_LIBRARIES} libzstd_static ${NUMA_LIBRARY_STATIC} tbb)
+target_link_libraries (SPTAGLibStatic DistanceUtils ${uring_LIBRARIES} libzstd_static ${NUMA_LIBRARY_STATIC} ${TBB_LIBRARIES} ${LeoFS_LIBRARIES})
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
     target_compile_options(SPTAGLibStatic PRIVATE -fPIC)
 endif()
@@ -123,12 +142,13 @@ file(GLOB_RECURSE KEYVALUETEST_FILES ${AnnService}/src/KeyValueTest/*.cpp)
 add_executable(ssdserving ${SSD_SERVING_HDR_FILES} ${SSD_SERVING_FILES})
 add_executable(spfresh ${SPFRESH_HDR_FILES} ${SPFRESH_FILES})
 add_executable(keyvaluetest ${KEYVALUETEST_HDR_FILES} ${KEYVALUETEST_FILES})
-target_link_libraries(ssdserving SPTAGLibStatic ${Boost_LIBRARIES} ${RocksDB_LIBRARIES})
-target_link_libraries(spfresh SPTAGLibStatic ${Boost_LIBRARIES} ${RocksDB_LIBRARIES})
-target_link_libraries(keyvaluetest SPTAGLibStatic ${Boost_LIBRARIES} ${RocksDB_LIBRARIES})
+target_link_libraries(ssdserving SPTAGLibStatic ${Boost_LIBRARIES})
+target_link_libraries(spfresh SPTAGLibStatic ${Boost_LIBRARIES})
+target_link_libraries(keyvaluetest SPTAGLibStatic ${Boost_LIBRARIES})
 target_compile_definitions(ssdserving PRIVATE _exe)
 target_compile_definitions(spfresh PRIVATE _exe)
 target_compile_definitions(keyvaluetest PRIVATE _exe)
+target_compile_options(keyvaluetest PRIVATE -g)
 
 # for Test
 add_library(ssdservingLib ${SSD_SERVING_HDR_FILES} ${SSD_SERVING_FILES})

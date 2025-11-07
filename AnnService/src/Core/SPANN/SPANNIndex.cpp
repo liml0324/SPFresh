@@ -175,6 +175,8 @@ namespace SPTAG
                     m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, true, m_options.m_spdkBatchSize, m_options.m_bufferLength, m_options.m_recovery));
                 } else if(m_options.m_useFileIO) {
                     m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, false, m_options.m_spdkBatchSize, m_options.m_bufferLength, m_options.m_recovery, true));
+                } else if(m_options.m_useLeoFS) {
+                    m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, false, m_options.m_spdkBatchSize, m_options.m_bufferLength, m_options.m_recovery, false, true));
                 } else {
                     m_extraSearcher.reset(new ExtraStaticSearcher<T>());
                 }
@@ -190,7 +192,7 @@ namespace SPTAG
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading storage\n");
             if (!m_extraSearcher->LoadIndex(m_options, m_versionMap, m_vectorTranslateMap, m_index)) return ErrorCode::Fail;
 
-            if ((m_options.m_useSPDK || m_options.m_useKV || m_options.m_useFileIO) && m_options.m_preReassign) {
+            if ((m_options.m_useSPDK || m_options.m_useKV || m_options.m_useFileIO || m_options.m_useLeoFS) && m_options.m_preReassign) {
                 std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(m_options.m_valueType, m_options.m_dim, m_options.m_vectorType, m_options.m_vectorDelimiter, m_options.m_iSSDNumberOfThreads));
                 auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
                 if (m_options.m_vectorPath.empty())
@@ -867,8 +869,9 @@ namespace SPTAG
                     }  
                 } else if (m_options.m_useFileIO) {
                     m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, false, m_options.m_spdkBatchSize, false, true));
-                }
-                else {
+                } else if (m_options.m_useFileIO) {
+                    m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, false, m_options.m_spdkBatchSize, false, false, true));
+                } else {
                     if (m_pQuantizer) {
                         m_extraSearcher.reset(new ExtraStaticSearcher<std::uint8_t>());
                     }
@@ -919,7 +922,7 @@ namespace SPTAG
                         return ErrorCode::Fail;
                     }
                     IOBINARY(ptr, ReadBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), (char*)(m_vectorTranslateMap.get()));
-                    if ((m_options.m_useKV || m_options.m_useSPDK || m_options.m_useFileIO) && m_options.m_preReassign) {
+                    if ((m_options.m_useKV || m_options.m_useSPDK || m_options.m_useFileIO || m_options.m_useLeoFS) && m_options.m_preReassign) {
                         m_extraSearcher->RefineIndex(p_reader, m_index);
                     }
                 }
@@ -1053,7 +1056,7 @@ namespace SPTAG
                                      std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex,
                                      bool p_normalized)
         {
-            if ((!m_options.m_useKV &&!m_options.m_useSPDK && !m_options.m_useFileIO) || m_extraSearcher == nullptr) {
+            if ((!m_options.m_useKV &&!m_options.m_useSPDK && !m_options.m_useFileIO && !m_options.m_useLeoFS) || m_extraSearcher == nullptr) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Only Support KV Extra Update\n");
                 return ErrorCode::Fail;
             }

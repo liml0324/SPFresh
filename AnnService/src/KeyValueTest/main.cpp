@@ -3,6 +3,7 @@
 
 #include "inc/Core/Common.h"
 #include "inc/Core/SPANN/ExtraFileController.h"
+#include "inc/Core/SPANN/ExtraLeoFSController.h"
 #define CONFLICT_TEST
 
 using namespace SPTAG;
@@ -24,20 +25,24 @@ int main(int argc, char* argv[]) {
     
     for (int i = 0; i < dataset_size; i++) {
         int size = rand() % (max_blocks << 12);
+        if (size == 1) {
+            size++;
+        }
         dataset[i] = "";
         for (int j = 0; j < size; j++) {
             dataset[i] += (char)(rand() % 256);
         }
     }
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Data generated\n");
-    SPANN::FileIO fileIO("/nvme0n1/lml/pbfile", 1024 * 1024, std::numeric_limits<SizeType>::max(), max_blocks * 2, 1024, 64, false);
+    // SPANN::FileIO fileIO("/nvme0n1/lml/pbfile", 1024 * 1024, std::numeric_limits<SizeType>::max(), max_blocks * 2, 1024, 64, false);
+    SPANN::LeoFSIO leoFSIO("/spfresh/testfile", 1024 * 1024, std::numeric_limits<SizeType>::max(), max_blocks * 2, 1024, 64, false);
+    leoFSIO.Initialize(true);
 
-
-    bool single_thread_test     = false;
-    bool multi_thread_test      = false;
-    bool multi_get_test         = false;
-    bool mixed_read_write_test  = false;
-    bool timeout_test           = true;
+    bool single_thread_test     = true;
+    bool multi_thread_test      = true;
+    bool multi_get_test         = true;
+    bool mixed_read_write_test  = true;
+    bool timeout_test           = false;
     bool conflict_test          = false;
 
 
@@ -54,12 +59,12 @@ SingleThreadTest:
         }
         // 写入数据
         for (int key = 0; key < kv_num; key++) {
-            fileIO.Put(key, dataset[values[key]]);
+            leoFSIO.Put(key, dataset[values[key]]);
         }
         // 读取数据
         for (int key = 0; key < kv_num; key++) {
             std::string readValue;
-            fileIO.Get(key, &readValue);
+            leoFSIO.Get(key, &readValue);
             if (dataset[values[key]] != readValue) {
                 std::cout << "Error: key " << key << " value not match" << std::endl;
                 std::cout << "True value: ";
@@ -71,7 +76,15 @@ SingleThreadTest:
                 for (auto c : readValue) {
                     std::cout << (int)c << " ";
                 }
+                int pos = 0;
+                while (pos < dataset[values[key]].size() && pos < readValue.size() && dataset[values[key]][pos] == readValue[pos]) {
+                    pos++;
+                }
                 std::cout << std::endl;
+                std::cout << "Error position: " << pos << std::endl;
+                std::cout << std::endl;
+                std::cout << "True length: " << dataset[values[key]].size() << std::endl;
+                std::cout << "Read length: " << readValue.size() << std::endl;
                 return 0;
             }
         }
@@ -84,7 +97,7 @@ SingleThreadTest:
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Single thread test passed\n");
     // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Single thread time: %d ms\n", std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
     // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Single thread IOPS: %fk\n", (double)iter_num * kv_num * 2 / std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
-    fileIO.GetStat();
+    leoFSIO.GetStat();
 
     // 多线程存取
 MultiThreadTest:
@@ -109,12 +122,12 @@ MultiThreadTest:
             thread_keys[thread_id].push_back(i);
         }
         for (int i = 0; i < thread_num; i++) {
-            threads.emplace_back([&fileIO, &values, &thread_keys, &dataset, i]() {
-                fileIO.Initialize();
+            threads.emplace_back([&leoFSIO, &values, &thread_keys, &dataset, i]() {
+                leoFSIO.Initialize();
                 for (auto key : thread_keys[i]) {
-                    fileIO.Put(key, dataset[values[key]]);
+                    leoFSIO.Put(key, dataset[values[key]]);
                 }
-                fileIO.ExitBlockController();
+                leoFSIO.ExitBlockController();
             });
         }
         for (auto& thread : threads) {
@@ -129,11 +142,11 @@ MultiThreadTest:
             thread_keys[thread_id].push_back(i);
         }
         for (int i = 0; i < thread_num; i++) {
-            threads.emplace_back([&fileIO, &values, &thread_keys, &dataset, &errors, &error_mtx, i]() {
-                fileIO.Initialize();
+            threads.emplace_back([&leoFSIO, &values, &thread_keys, &dataset, &errors, &error_mtx, i]() {
+                leoFSIO.Initialize();
                 for (auto key : thread_keys[i]) {
                     std::string readValue;
-                    fileIO.Get(key, &readValue);
+                    leoFSIO.Get(key, &readValue);
                     if (dataset[values[key]] != readValue) {
                         // errors[i].push_back({key, readValue});
                         errors[i] = true;
@@ -152,7 +165,7 @@ MultiThreadTest:
                         return;
                     }
                 }
-                fileIO.ExitBlockController();
+                leoFSIO.ExitBlockController();
             });
         }
         for (auto& thread : threads) {
@@ -170,7 +183,7 @@ MultiThreadTest:
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Multi thread test passed\n");
     // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Multi thread time: %d ms\n", std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
     // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Multi thread IOPS: %fk\n", (double)iter_num * kv_num * 2 / std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
-    fileIO.GetStat();
+    leoFSIO.GetStat();
 
     // MultiGet测试
 MultiGetTest:
@@ -195,10 +208,10 @@ MultiGetTest:
             thread_keys[thread_id].push_back(i);
         }
         for (int i = 0; i < thread_num; i++) {
-            threads.emplace_back([&fileIO, &values, &thread_keys, &errors, &error_mtx, &dataset, i]() {
-                fileIO.Initialize();
+            threads.emplace_back([&leoFSIO, &values, &thread_keys, &errors, &error_mtx, &dataset, i]() {
+                leoFSIO.Initialize();
                 for (auto key : thread_keys[i]) {
-                    fileIO.Put(key, dataset[values[key]]);
+                    leoFSIO.Put(key, dataset[values[key]]);
                 }
                 std::vector<std::string> readValues;
                 std::vector<int> keys;
@@ -209,7 +222,7 @@ MultiGetTest:
                     for (int j = k; j < std::min(k + 256, num); j++) {
                         keys.push_back(thread_keys[i][j]);
                     }
-                    fileIO.MultiGet(keys, &readValues);
+                    leoFSIO.MultiGet(keys, &readValues);
                     for (int j = 0; j < keys.size(); j++) {
                         if (dataset[values[keys[j]]] != readValues[j]) {
                             errors[i] = true;
@@ -229,7 +242,7 @@ MultiGetTest:
                         }
                     }
                 }
-                fileIO.ExitBlockController();
+                leoFSIO.ExitBlockController();
             });
         }
         for (auto& thread : threads) {
@@ -247,7 +260,7 @@ MultiGetTest:
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "MultiGet test passed\n");
     // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "MultiGet time: %d ms\n", std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
     // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "MultiGet IOPS: %fk\n", (double)iter_num * kv_num * 2 / std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
-    fileIO.GetStat();
+    leoFSIO.GetStat();
 
     // 多线程混合读写存取
 MixReadWriteTest:
@@ -268,15 +281,15 @@ MixReadWriteTest:
             thread_keys[thread_id].push_back(i);
         }
         for (int i = 0; i < thread_num; i++) {
-            threads.emplace_back([&fileIO, &values, &thread_keys, &dataset, &errors, &error_mtx, i, max_blocks, read_rate, iter_num, dataset_size]() {
-                fileIO.Initialize();
+            threads.emplace_back([&leoFSIO, &values, &thread_keys, &dataset, &errors, &error_mtx, i, max_blocks, read_rate, iter_num, dataset_size]() {
+                leoFSIO.Initialize();
                 int num = thread_keys[i].size();
                 int read_count = 0, write_count = 0;
                 bool is_read = false;
                 bool is_merge = false;
                 for (auto key : thread_keys[i]) {
                     values[key] = rand() % dataset_size;
-                    fileIO.Put(key, dataset[values[key]]);
+                    leoFSIO.Put(key, dataset[values[key]]);
                 }
                 for (int j = 0; j < iter_num; j++) {
                     int key = thread_keys[i][rand() % num];
@@ -292,7 +305,7 @@ MixReadWriteTest:
                     }
                     if (is_read) {
                         std::string readValue;
-                        fileIO.Get(key, &readValue);
+                        leoFSIO.Get(key, &readValue);
                         if (dataset[values[key]] != readValue) {
                             // errors[i].push_back({key, readValue});
                             errors[i] = true;
@@ -317,10 +330,10 @@ MixReadWriteTest:
                         for (int k = 0; k < size; k++) {
                             mergeValue += (char)(rand() % 256);
                         }
-                        fileIO.Merge(key, mergeValue);
+                        leoFSIO.Merge(key, mergeValue);
                         write_count++; read_count++;
                         std::string readValue;
-                        fileIO.Get(key, &readValue);
+                        leoFSIO.Get(key, &readValue);
                         if (readValue != dataset[values[key]] + mergeValue) {
                             errors[i] = true;
                             std::lock_guard<std::mutex> lock(error_mtx);
@@ -337,15 +350,15 @@ MixReadWriteTest:
                             std::cout << std::endl;
                             return;
                         }
-                        fileIO.Put(key, dataset[values[key]]);
+                        leoFSIO.Put(key, dataset[values[key]]);
                         write_count++; read_count++;
                     } else {
                         values[key] = rand() % dataset_size; 
-                        fileIO.Put(key, dataset[values[key]]);
+                        leoFSIO.Put(key, dataset[values[key]]);
                         write_count++;
                     }
                 }
-                fileIO.ExitBlockController();
+                leoFSIO.ExitBlockController();
             });
         }
         for (auto& thread : threads) {
@@ -363,7 +376,7 @@ MixReadWriteTest:
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Mix read write test passed\n");
     // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Mix read write time: %d ms\n", std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
     // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Mix read write IOPS: %fk\n", (double)batch_num * iter_num / std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
-    fileIO.GetStat();
+    leoFSIO.GetStat();
 
     // 超时测试
 TimeoutTest:
@@ -378,11 +391,11 @@ TimeoutTest:
     for (int iter = 0; iter < iter_num; iter++) {
         for (int i = 0; i < kv_num; i++) {
             values[i] = rand() % dataset_size;
-            fileIO.Put(i, dataset[values[i]]);
+            leoFSIO.Put(i, dataset[values[i]]);
         }
         for (int key = 0; key < kv_num; key++) {
             std::string readValue;
-            auto result = fileIO.Get(key, &readValue, timeout);
+            auto result = leoFSIO.Get(key, &readValue, timeout);
             if (result == ErrorCode::Fail) {
                 timeout_times++;
             }
@@ -395,11 +408,11 @@ TimeoutTest:
     for (int iter = 0; iter < iter_num; iter++) {
         for (int i = 0; i < kv_num; i++) {
             values[i] = rand() % dataset_size;
-            fileIO.Put(i, dataset[values[i]]);
+            leoFSIO.Put(i, dataset[values[i]]);
         }
         for (int key = 0; key < kv_num; key++) {
             std::string readValue;
-            auto result = fileIO.Get(key, &readValue);
+            auto result = leoFSIO.Get(key, &readValue);
             if (result == ErrorCode::Fail) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error while get key %d\n", key);
                 return 0;
@@ -411,7 +424,7 @@ TimeoutTest:
         }
     }
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Timeout test passed\n");
-    fileIO.GetStat();
+    leoFSIO.GetStat();
 
 #ifdef CONFLICT_TEST
     // 冲突测试
@@ -434,11 +447,11 @@ ConflictTest:
         }
         std::string init_str(PageSize, -1);
         for (int i = 0; i < kv_num; i++) {
-            fileIO.Put(i, init_str);
+            leoFSIO.Put(i, init_str);
         }
         for (int i = 0; i < thread_num; i++) {
-            threads.emplace_back([&fileIO, &errors, &error_mtx, &dataset, iter_num, kv_num, i]() {
-                fileIO.Initialize();
+            threads.emplace_back([&leoFSIO, &errors, &error_mtx, &dataset, iter_num, kv_num, i]() {
+                leoFSIO.Initialize();
                 std::vector<std::string> readValues;
                 std::vector<int> keys;
                 std::vector<int> values(kv_num);
@@ -457,7 +470,7 @@ ConflictTest:
                     }
                     if (is_read && !batch_read) {
                         std::string readValue;
-                        fileIO.Get(key, &readValue);
+                        leoFSIO.Get(key, &readValue);
                         if ((int)readValue[0] != i) {
                             ;
                         }
@@ -491,7 +504,7 @@ ConflictTest:
                             key_set.insert(rand() % kv_num);
                         }
                         keys.assign(key_set.begin(), key_set.end());
-                        fileIO.MultiGet(keys, &readValues);
+                        leoFSIO.MultiGet(keys, &readValues);
                         for (int j = 0; j < keys.size(); j++) {
                             if ((int)readValues[j][0] != i) {
                                 ;
@@ -522,10 +535,10 @@ ConflictTest:
                         values[key] = rand() % dataset.size();
                         std::string tmp_str(dataset[values[key]]);
                         tmp_str[0] = (char)i;
-                        fileIO.Put(key, tmp_str);
+                        leoFSIO.Put(key, tmp_str);
                     }
                 }
-                fileIO.ExitBlockController();
+                leoFSIO.ExitBlockController();
             });
         }
         for (auto& thread : threads) {
@@ -543,7 +556,7 @@ ConflictTest:
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Conflict test passed\n");
     // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Conflict test time: %d ms\n", std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
     // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Conflict test IOPS: %fk\n", (double)iter_num * kv_num * 2 / std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
-    fileIO.GetStat();
+    leoFSIO.GetStat();
 #endif
 End:
     std::cout << "Test passed" << std::endl;

@@ -97,6 +97,7 @@ DefineSSDParameter(m_fullDeletedIDFile, std::string, std::string("fulldeleted"),
 DefineSSDParameter(m_useKV, bool, false, "UseKV")
 DefineSSDParameter(m_useSPDK, bool, false, "UseSPDK")
 DefineSSDParameter(m_useFileIO, bool, false, "UseFileIO")
+DefineSSDParameter(m_useLeoFS, bool, false, "UseLeoFS")
 DefineSSDParameter(m_spdkBatchSize, int, 64, "SpdkBatchSize")
 DefineSSDParameter(m_KVPath, std::string, std::string(""), "KVPath")
 DefineSSDParameter(m_spdkMappingPath, std::string, std::string(""), "SpdkMappingPath")

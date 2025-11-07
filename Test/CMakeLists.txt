@@ -19,11 +19,17 @@ if (NOT LIBRARYONLY)
         message (FATAL_ERROR "Could not find Boost 1.67!")
     endif()
 
-    include_directories(${PROJECT_SOURCE_DIR}/AnnService ${PROJECT_SOURCE_DIR}/Test ${PROJECT_SOURCE_DIR}/ThirdParty/spdk/build/include)
+    # remove spdk temporarily
+    # include_directories(${PROJECT_SOURCE_DIR}/AnnService ${PROJECT_SOURCE_DIR}/Test ${PROJECT_SOURCE_DIR}/ThirdParty/spdk/build/include)
+    include_directories(${PROJECT_SOURCE_DIR}/AnnService ${PROJECT_SOURCE_DIR}/Test)
 
     file(GLOB TEST_HDR_FILES ${PROJECT_SOURCE_DIR}/Test/inc/Test.h)
     file(GLOB TEST_SRC_FILES ${PROJECT_SOURCE_DIR}/Test/src/*.cpp)
+    # remove KVTest temporarily, because it is for spdk
+    list(REMOVE_ITEM TEST_SRC_FILES ${PROJECT_SOURCE_DIR}/Test/src/KVTest.cpp)
     add_executable(SPTAGTest ${TEST_SRC_FILES} ${TEST_HDR_FILES})
+    message (STATUS "Test Source Files: ${TEST_SRC_FILES}")
+
     target_link_libraries(SPTAGTest SPTAGLibStatic ssdservingLib ${Boost_LIBRARIES})
 
     install(TARGETS SPTAGTest

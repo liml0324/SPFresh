@@ -101,6 +101,7 @@ namespace SPTAG {
             bool m_useKV;
             bool m_useSPDK;
             bool m_useFileIO;
+            bool m_useLeoFS;
             std::string m_KVPath;
             std::string m_spdkMappingPath;
             std::string m_ssdInfoFile;

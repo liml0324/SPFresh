@@ -13,8 +13,9 @@
 #include "inc/Core/Common/FineGrainedLock.h"
 #include "PersistentBuffer.h"
 #include "inc/Core/Common/PostingSizeRecord.h"
-#include "ExtraSPDKController.h"
+// #include "ExtraSPDKController.h"
 #include "ExtraFileController.h"
+#include "ExtraLeoFSController.h"
 #include <chrono>
 #include <cstdint>
 #include <map>
@@ -27,7 +28,7 @@
 #include <tbb/concurrent_hash_map.h>
 
 #ifdef ROCKSDB
-#include "ExtraRocksDBController.h"
+// #include "ExtraRocksDBController.h"
 #endif
 
 // enable rocksdb io_uring
@@ -164,18 +165,21 @@ namespace SPTAG::SPANN {
         tbb::concurrent_hash_map<SizeType, SizeType> m_mergeList;
 
     public:
-        ExtraDynamicSearcher(const char* dbPath, int dim, int postingBlockLimit, bool useDirectIO, float searchLatencyHardLimit, int mergeThreshold, bool useSPDK = false, int batchSize = 64, int bufferLength = 3, bool recovery = false, bool useFileIO = false) {
+        ExtraDynamicSearcher(const char* dbPath, int dim, int postingBlockLimit, bool useDirectIO, float searchLatencyHardLimit, int mergeThreshold, bool useSPDK = false, int batchSize = 64, int bufferLength = 3, bool recovery = false, bool useFileIO = false, bool useLeoFS = false) {
             if(useFileIO) {
                 db.reset(new FileIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + bufferLength, 1024, batchSize, recovery));
                 m_postingSizeLimit = postingBlockLimit * PageSize / (sizeof(ValueType) * dim + sizeof(int) + sizeof(uint8_t));
-            }
-            else if (useSPDK) {
-                db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + bufferLength, 1024, batchSize, recovery));
+            // }
+            // else if (useSPDK) {
+            //     db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + bufferLength, 1024, batchSize, recovery));
+            //     m_postingSizeLimit = postingBlockLimit * PageSize / (sizeof(ValueType) * dim + sizeof(int) + sizeof(uint8_t));
+            } else if (useLeoFS){
+                db.reset(new LeoFSIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + bufferLength, 1024, batchSize, recovery));
                 m_postingSizeLimit = postingBlockLimit * PageSize / (sizeof(ValueType) * dim + sizeof(int) + sizeof(uint8_t));
             } else {
 #ifdef ROCKSDB
-                db.reset(new RocksDBIO(dbPath, useDirectIO, false, recovery));
-                m_postingSizeLimit = postingBlockLimit;
+                // db.reset(new RocksDBIO(dbPath, useDirectIO, false, recovery));
+                // m_postingSizeLimit = postingBlockLimit;
 #endif
             }
             m_metaDataSize = sizeof(int) + sizeof(uint8_t);
@@ -1164,12 +1168,12 @@ namespace SPTAG::SPANN {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery: Current vector num: %d.\n", m_versionMap->Count());
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery:Current posting num: %d.\n", m_postingSizes.GetPostingNum());
             }
-            else if (!m_opt->m_useSPDK && !m_opt->m_useFileIO) {
+            else if (!m_opt->m_useSPDK && !m_opt->m_useFileIO && !m_opt->m_useLeoFS) {
                 m_versionMap->Load(m_opt->m_deleteIDFile, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
                 m_postingSizes.Load(m_opt->m_ssdInfoFile, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Current vector num: %d.\n", m_versionMap->Count());
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Current posting num: %d.\n", m_postingSizes.GetPostingNum());
-            } else if (m_opt->m_useSPDK || m_opt->m_useFileIO) {
+            } else if (m_opt->m_useSPDK || m_opt->m_useFileIO || m_opt->m_useLeoFS) {
                 m_versionMap->Initialize(m_opt->m_vectorSize, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Copying data from static to SPDK\n");
                 std::shared_ptr<IExtraSearcher> storeExtraSearcher;
@@ -1253,7 +1257,7 @@ namespace SPTAG::SPANN {
                 if (m_opt->m_enableWAL) {
                     std::string p_persistenWAL = m_opt->m_persistentBufferPath + "_WAL";
                     std::shared_ptr<Helper::KeyValueIO> pdb;
-                    pdb.reset(new RocksDBIO(p_persistenWAL.c_str(), false, false));
+                    // pdb.reset(new RocksDBIO(p_persistenWAL.c_str(), false, false));
                     m_wal.reset(new PersistentBuffer(pdb));
                 } 
             }
