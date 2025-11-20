@@ -90,6 +90,22 @@ namespace SPTAG
                 return Save(ptr);
             }
 
+            inline ErrorCode Save(int cid, int fd)
+            {
+                SizeType deleted = m_inserted.load();
+                // IOBINARY(output, WriteBinary, sizeof(SizeType), (char*)&deleted);
+                dfs_write(cid, fd, (char*)&deleted, sizeof(SizeType));
+                return m_data.Save(cid, fd);
+            }
+
+            inline ErrorCode Save(int cid, std::string filename)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFS: Save %s To %s\n", m_data.Name().c_str(), filename.c_str());
+                int fd = dfs_open(cid, filename.c_str(), O_CREAT | O_TRUNC | O_RDWR, 0644);
+                if (fd < 0) return ErrorCode::FailedCreateFile;
+                return Save(cid, fd);
+            }
+
             inline ErrorCode Load(std::shared_ptr<Helper::DiskIO> input, SizeType blockSize, SizeType capacity, InvalidIDBehavior invalidIDBehaviorSetting = InvalidIDBehavior::Passthrough)
             {
                 m_invalidIDBehaviorSetting = invalidIDBehaviorSetting;
@@ -112,6 +128,25 @@ namespace SPTAG
                 m_invalidIDBehaviorSetting = invalidIDBehaviorSetting;
                 m_inserted = *((SizeType*)pmemoryFile);
                 return m_data.Load(pmemoryFile + sizeof(SizeType), blockSize, capacity);
+            }
+
+            inline ErrorCode Load(int cid, int fd, SizeType blockSize, SizeType capacity, InvalidIDBehavior invalidIDBehaviorSetting = InvalidIDBehavior::Passthrough)
+            {
+                m_invalidIDBehaviorSetting = invalidIDBehaviorSetting;
+                SizeType deleted;
+                // IOBINARY(input, ReadBinary, sizeof(SizeType), (char*)&deleted);
+                dfs_read(cid, fd, (char*)&deleted, sizeof(SizeType));
+                m_inserted = deleted;
+                return m_data.Load(cid, fd, blockSize, capacity);
+            }
+
+            inline ErrorCode Load(int cid, std::string filename, SizeType blockSize, SizeType capacity, InvalidIDBehavior invalidIDBehaviorSetting = InvalidIDBehavior::Passthrough)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFS: Load %s From %s\n", m_data.Name().c_str(), filename.c_str());
+                int fd = dfs_open(cid, filename.c_str(), O_RDONLY, 0644);
+                if (fd < 0) return ErrorCode::FailedOpenFile;
+                return Load(cid, fd, blockSize, capacity, invalidIDBehaviorSetting);
+                // return Load(ptr, blockSize, capacity, invalidIDBehaviorSetting);
             }
 
             inline ErrorCode AddBatch(SizeType num)

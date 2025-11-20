@@ -463,9 +463,9 @@ namespace SPTAG::SPANN {
             } else {
                 m_pBlockMapping.Initialize(0, 1, blockSize, capacity);
             }
-            m_writeCount.resize(m_pBlockMapping.R());
-            m_readCount.resize(m_pBlockMapping.R());
-            m_mergeCount.resize(m_pBlockMapping.R());
+            // m_writeCount.resize(m_pBlockMapping.R());
+            // m_readCount.resize(m_pBlockMapping.R());
+            // m_mergeCount.resize(m_pBlockMapping.R());
 
             for (int i = 0; i < bufferSize; i++) {
                 m_buffer.push((uintptr_t)(new AddressType[m_blockLimit]));
@@ -578,7 +578,7 @@ namespace SPTAG::SPANN {
             }
             if (key >= r) return ErrorCode::Fail;
 
-            m_readCount[key]++;
+            // m_readCount[key]++;
             if (m_fileIoUseCache) {
                 auto size = ((AddressType*)At(key))[0];
                 value->resize(size);
@@ -624,7 +624,7 @@ namespace SPTAG::SPANN {
             }
             if (key >= r) return ErrorCode::Fail;
 
-            m_readCount[key]++;
+            // m_readCount[key]++;
             if (m_fileIoUseCache) {
                 auto size = ((AddressType*)At(key))[0];
                 value->resize(size);
@@ -675,7 +675,7 @@ namespace SPTAG::SPANN {
             values->resize(keys.size());
             int i = 0;
             for (SizeType key : keys) {
-                m_readCount[key]++;
+                // m_readCount[key]++;
                 if (m_fileIoUseLock) {
                     m_updateMutex.lock_shared();
                     r = m_pBlockMapping.R();
@@ -775,13 +775,13 @@ namespace SPTAG::SPANN {
                 delta = key + 1 - m_pBlockMapping.R();
                 if (delta > 0) {
                     m_pBlockMapping.AddBatch(delta);
-                    m_readCount.resize(m_readCount.size() + delta, 0);
-                    m_writeCount.resize(m_writeCount.size() + delta, 0);
-                    m_mergeCount.resize(m_mergeCount.size() + delta, 0);
+                    // m_readCount.resize(m_readCount.size() + delta, 0);
+                    // m_writeCount.resize(m_writeCount.size() + delta, 0);
+                    // m_mergeCount.resize(m_mergeCount.size() + delta, 0);
                 }
                 m_updateMutex.unlock();
             }
-            m_writeCount[key]++;
+            // m_writeCount[key]++;
 
             if (m_fileIoUseCache) {
                 m_pShardedLRUCache->put(key, (void *)(value.data()), value.size());
@@ -931,7 +931,7 @@ namespace SPTAG::SPANN {
             
             int64_t* postingSize = (int64_t*)At(key);
 
-            m_mergeCount[key]++;
+            // m_mergeCount[key]++;
             if (m_fileIoUseCache) {
                 m_pShardedLRUCache->merge(key, (void *)(value.data()), value.size());
             }
@@ -1115,9 +1115,9 @@ namespace SPTAG::SPANN {
                 }
             }
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save mapping (%d,%d) Finish!\n", CR, m_blockLimit);
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin printing hot/cold stat\n");
-            if (PrintHotColdStat() == ErrorCode::Success)
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "End printing hot/cold stat\n");
+            // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin printing hot/cold stat\n");
+            // if (PrintHotColdStat() == ErrorCode::Success)
+            //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "End printing hot/cold stat\n");
             return ErrorCode::Success;
         }
 

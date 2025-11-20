@@ -112,6 +112,7 @@ namespace SPTAG
             std::shared_ptr<std::vector<std::string>> GetIndexFiles() const
             {
                 std::shared_ptr<std::vector<std::string>> files(new std::vector<std::string>);
+                // 得到结果：<headIndexFolder>/<indexFile>，如head_index/vector.bin
                 auto headfiles = m_index->GetIndexFiles();
                 for (auto file : *headfiles) {
                     files->push_back(m_options.m_headIndexFolder + FolderSep + file);

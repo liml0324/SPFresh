@@ -629,6 +629,7 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
 
     IndexAlgoType algoType = iniReader.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined);
     VectorValueType valueType = iniReader.GetParameter("Index", "ValueType", VectorValueType::Undefined);
+    // 这里的p_vectorIndex类型是SPANN::Index
     if ((p_vectorIndex = CreateInstance(algoType, valueType)) == nullptr) return ErrorCode::FailedParseValue;
 
     ErrorCode ret = ErrorCode::Success;
@@ -645,6 +646,9 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
     std::vector<std::shared_ptr<Helper::DiskIO>> handles;
     for (std::string& f : *indexfiles) {
         auto ptr = SPTAG::f_createIO();
+        // 这里的folderPath就是运行时命令行参数传入的路径，比如/mnt/intel1/mulong/store_spacev100m_ratio1p/
+        // 所以拼起来就是/mnt/intel1/mulong/store_spacev100m_ratio1p/head_index/<files>
+        // <files>是vector.bin等文件
         if (ptr == nullptr || !ptr->Initialize((folderPath + f).c_str(), std::ios::binary | std::ios::in)) {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open file %s!\n", (folderPath + f).c_str());
             ptr = nullptr;

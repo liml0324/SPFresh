@@ -911,6 +911,18 @@ namespace SPTAG {
 
                 p_index->GetDBStat();
 
+                if (p_opts.m_recoveryTest) {
+                    return;
+                }
+
+                if (!p_opts.m_recovery) {
+                    p_index->Checkpoint();
+                }
+
+                if (p_opts.m_checkpointTest) {
+                    return;
+                }
+
                 if (!p_opts.m_onlySearchFinalBatch) {
                     if (p_opts.m_maxInternalResultNum != -1) 
                     {

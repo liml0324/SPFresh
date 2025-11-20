@@ -81,6 +81,8 @@ namespace SPTAG
             return ErrorCode::Success;
         }
 
+        // TODO: 可能需要考虑做一个从LeoFS读取的版本
+        // m_pSamples是DataSet类型，已经做好了，还需要考虑剩下几个
         template <typename T>
         ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams)
         {

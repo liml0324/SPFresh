@@ -62,6 +62,7 @@ namespace SPTAG
         {
             IndexAlgoType algoType = p_reader.GetParameter("Base", "IndexAlgoType", IndexAlgoType::Undefined);
             VectorValueType valueType = p_reader.GetParameter("Base", "ValueType", VectorValueType::Undefined);
+            // 这里m_index类型是BKT::Index
             if ((m_index = CreateInstance(algoType, valueType)) == nullptr) return ErrorCode::FailedParseValue;
 
             std::string sections[] = { "Base", "SelectHead", "BuildHead", "BuildSSDIndex" };
@@ -123,13 +124,18 @@ namespace SPTAG
         template <typename T>
         ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams)
         {
+            // m_index的类型由Base中的IndexAlgoType确定
             m_index->SetQuantizer(m_pQuantizer);
 
             auto headfiles = m_index->GetIndexFiles();
             if (m_options.m_recovery) {
                 std::shared_ptr<std::vector<std::string>> files(new std::vector<std::string>);
+                // 这里得到的headfiles就是vectors.bin等文件名
                 auto headfiles = m_index->GetIndexFiles();
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery: Loading another in-memory index\n");
+                // persistentBufferPath默认是以pbfile结尾的绝对路径，后面再加上_headIndex
+                // 然后把前面的文件名拼在后面
+                // TODO: 这里需要考虑，是不是需要在DFS上做
                 std::string filename = m_options.m_persistentBufferPath + "_headIndex";
                 for (auto file : *headfiles) {
                     files->push_back(filename + FolderSep + file);
@@ -143,6 +149,7 @@ namespace SPTAG
                     }
                     handles.push_back(std::move(ptr));
                 }
+                // 让底下的index（默认是BKT index）去加载这些文件
                 m_index->LoadIndexData(handles);
             } else if (m_index->LoadIndexData(p_indexStreams) != ErrorCode::Success) return ErrorCode::Fail;
 
@@ -869,7 +876,7 @@ namespace SPTAG
                     }  
                 } else if (m_options.m_useFileIO) {
                     m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, false, m_options.m_spdkBatchSize, false, true));
-                } else if (m_options.m_useFileIO) {
+                } else if (m_options.m_useLeoFS) {
                     m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, false, m_options.m_spdkBatchSize, false, false, true));
                 } else {
                     if (m_pQuantizer) {

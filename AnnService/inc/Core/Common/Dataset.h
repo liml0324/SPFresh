@@ -3,6 +3,7 @@
 
 #ifndef _SPTAG_COMMON_DATASET_H_
 #define _SPTAG_COMMON_DATASET_H_
+#include "leofs.h"
 
 namespace SPTAG
 {
@@ -370,6 +371,27 @@ namespace SPTAG
                 return Save(ptr);
             }
 
+            ErrorCode Save(int cid, int fd) {
+                SizeType CR = R();
+                dfs_write(cid, fd, &CR, sizeof(SizeType));
+                dfs_write(cid, fd, &mycols, sizeof(DimensionType));
+                for (SizeType i = 0; i < CR; i++) {
+                    dfs_write(cid, fd, At(i), sizeof(T) * mycols);
+                }
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFS: Save %s (%d,%d) Finish!\n", name.c_str(), CR, mycols);
+                return ErrorCode::Success;
+            }
+
+            ErrorCode Save(int cid, std::string sDataPointsFileName) const
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFS: Save %s To %s\n", name.c_str(), sDataPointsFileName.c_str());
+                int fd = dfs_open(cid, sDataPointsFileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                if (fd < 0) return ErrorCode::FailedCreateFile;
+                auto ret = Save(cid, fd);
+                dfs_close(cid, fd);
+                return ret;
+            }
+
             ErrorCode Load(std::shared_ptr<Helper::DiskIO> pInput, SizeType blockSize, SizeType capacity)
             {
                 IOBINARY(pInput, ReadBinary, sizeof(SizeType), (char*)&(rows));
@@ -408,6 +430,33 @@ namespace SPTAG
                 return ErrorCode::Success;
             }
 
+            ErrorCode Load(int cid, int fd, SizeType blockSize, SizeType capacity)
+            {
+                // IOBINARY(pInput, ReadBinary, sizeof(SizeType), (char*)&(rows));
+                // IOBINARY(pInput, ReadBinary, sizeof(DimensionType), (char*)&mycols);
+                dfs_read(cid, fd, &rows, sizeof(SizeType));
+                dfs_read(cid, fd, &mycols, sizeof(DimensionType));
+
+                if (data == nullptr) Initialize(rows, mycols, blockSize, capacity);
+
+                for (SizeType i = 0; i < rows; i++) {
+                    // IOBINARY(pInput, ReadBinary, sizeof(T) * mycols, (char*)At(i));
+                    dfs_read(cid, fd, At(i), sizeof(T) * mycols);
+                }
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load %s (%d,%d) Finish!\n", name.c_str(), rows, mycols);
+                return ErrorCode::Success;
+            }
+
+            ErrorCode Load(int cid, std::string sDataPointsFileName, SizeType blockSize, SizeType capacity)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load %s From %s\n", name.c_str(), sDataPointsFileName.c_str());
+                int fd = dfs_open(cid, sDataPointsFileName.c_str(), O_RDONLY, 0644);
+                if (fd < 0) return ErrorCode::FailedOpenFile;
+                // auto ptr = f_createIO();
+                // if (ptr == nullptr || !ptr->Initialize(sDataPointsFileName.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
+                return Load(cid, fd, blockSize, capacity);
+            }
+
             ErrorCode Refine(const std::vector<SizeType>& indices, COMMON::Dataset<T>& dataset) const
             {
                 SizeType newrows = (SizeType)(indices.size());
@@ -432,12 +481,32 @@ namespace SPTAG
                 return ErrorCode::Success;
             }
 
+            virtual ErrorCode Refine(int cid, const std::vector<SizeType>& indices, int fd) const
+            {
+                SizeType newrows = (SizeType)(indices.size());
+                dfs_write(cid, fd, &newrows, sizeof(SizeType));
+                dfs_write(cid, fd, &mycols, sizeof(DimensionType));
+
+                for (SizeType i = 0; i < newrows; i++) {
+                    dfs_write(cid, fd, At(indices[i]), sizeof(T) * mycols);
+                }
+                return ErrorCode::Success;
+            }
+
             virtual ErrorCode Refine(const std::vector<SizeType>& indices, std::string sDataPointsFileName) const
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save Refine %s To %s\n", name.c_str(), sDataPointsFileName.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(sDataPointsFileName.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
                 return Refine(indices, ptr);
+            }
+
+            virtual ErrorCode Refine(int cid, const std::vector<SizeType>& indices, std::string sDataPointsFileName) const
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save Refine %s To %s\n", name.c_str(), sDataPointsFileName.c_str());
+                int fd = dfs_open(cid, sDataPointsFileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+                if (fd < 0) return ErrorCode::FailedCreateFile;
+                return Refine(cid, indices, fd);
             }
         };
 

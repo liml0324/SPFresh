@@ -189,7 +189,9 @@ namespace SPTAG::SPANN {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Posting size limit: %d, search limit: %f, merge threshold: %d\n", m_postingSizeLimit, searchLatencyHardLimit, m_mergeThreshold);
         }
 
-        ~ExtraDynamicSearcher() {}
+        ~ExtraDynamicSearcher() {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraDynamicSearcher destructor\n");
+        }
 
         //headCandidates: search data structrue for "vid" vector
         //headID: the head vector that stands for vid
@@ -551,12 +553,10 @@ namespace SPTAG::SPANN {
                 }
                 //LOG(Helper::LogLevel::LL_Info, "Resize\n");
                 localIndices.resize(index);
-
                 auto clusterBegin = std::chrono::high_resolution_clock::now();
                 // k = 2, maybe we can change the split number, now it is fixed
                 SPTAG::COMMON::KmeansArgs<ValueType> args(2, smallSample.C(), (SizeType)localIndices.size(), 1, p_index->GetDistCalcMethod());
                 std::shuffle(localIndices.begin(), localIndices.end(), std::mt19937(std::random_device()()));
-
                 int numClusters = SPTAG::COMMON::KmeansClustering(smallSample, localIndices, 0, (SizeType)localIndices.size(), args, 1000, 100.0F, false, nullptr);
 
                 auto clusterEnd = std::chrono::high_resolution_clock::now();
@@ -1159,12 +1159,35 @@ namespace SPTAG::SPANN {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DataBlockSize: %d, Capacity: %d\n", m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
 
             if (m_opt->m_recovery) {
+                int cid = 0;
+                // if (m_opt->m_useLeoFS) {
+                //     const char* LeoFSConfigPath = getenv("LEOFS_CONFIG_PATH");
+                //     if (LeoFSConfigPath == nullptr) {
+                //         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ExtraDynamicSearcher: Cannot find LeoFS config path.\n");
+                //         return false;
+                //     }
+                //     cid = dfs_connect_config(LeoFSConfigPath);
+                // }
                 std::string p_persistenMap = m_opt->m_persistentBufferPath + "_versionMap";
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery: Loading version map\n");
-                m_versionMap->Load(p_persistenMap, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
+                // if (m_opt->m_useLeoFS) {
+                //     m_versionMap->Load(cid, p_persistenMap, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
+                // }
+                // else {
+                    m_versionMap->Load(p_persistenMap, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
+                // }
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery: Loading posting size\n");
                 std::string p_persistenRecord = m_opt->m_persistentBufferPath + "_postingSizeRecord";
-                m_postingSizes.Load(p_persistenRecord, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
+                // if (m_opt->m_useLeoFS) {
+                //     m_postingSizes.Load(cid, p_persistenRecord, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
+                // }
+                // else {
+                    m_postingSizes.Load(p_persistenRecord, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
+                // }
+                // if (m_opt->m_useLeoFS) {
+                //     dfs_disconnect(cid);
+                // }
+                // m_postingSizes.Load(p_persistenRecord, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery: Current vector num: %d.\n", m_versionMap->Count());
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery:Current posting num: %d.\n", m_postingSizes.GetPostingNum());
             }
@@ -1193,6 +1216,7 @@ namespace SPTAG::SPANN {
                 // 多线程将posting拷贝到KV存储中
                 auto func = [&]()
                 {
+                    auto begin_time = std::chrono::high_resolution_clock::now();
                     Initialize();
                     size_t index = 0;
                     while (true)
@@ -1203,7 +1227,9 @@ namespace SPTAG::SPANN {
 
                             if ((index & ((1 << 14) - 1)) == 0)
                             {
+                                auto end_time = std::chrono::high_resolution_clock::now();
                                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Copy to SPDK: Sent %.2lf%%...\n", index * 100.0 / totalPostingNum);
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Copy to SPDK: Time elapsed: %ld ms.\n", std::chrono::duration_cast<std::chrono::milliseconds>(end_time - begin_time).count());
                             }
                             std::string tempPosting;
                             storeExtraSearcher->GetWritePosting(index, tempPosting);
@@ -1240,8 +1266,10 @@ namespace SPTAG::SPANN {
                         }
                     }
                 };
-                for (int j = 0; j < m_opt->m_iSSDNumberOfThreads; j++) { threads.emplace_back(func); }
-                for (auto& thread : threads) { thread.join(); }
+                if (!m_opt->m_checkpointTest) {
+                    for (int j = 0; j < m_opt->m_iSSDNumberOfThreads; j++) { threads.emplace_back(func); }
+                    for (auto& thread : threads) { thread.join(); }
+                }
             } 
 
             // Update模式下需要Split和Reassign线程池
@@ -1263,6 +1291,7 @@ namespace SPTAG::SPANN {
             }
 
             /** recover the previous WAL **/
+            // TODO: 这里针对LeoFS可能还需要做一些修改
             if (m_opt->m_recovery && m_opt->m_enableWAL) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery: WAL\n");
                 std::string assignment;

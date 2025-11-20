@@ -17,6 +17,8 @@
 #include "Dataset.h"
 #include "DistanceUtils.h"
 
+#include "leofs.h"
+
 namespace SPTAG
 {
     namespace COMMON
@@ -50,7 +52,7 @@ namespace SPTAG
             float* weightedCounts;
             float* newWeightedCounts;
             std::function<float(const T*, const T*, DimensionType)> fComputeDistance;
-            const std::shared_ptr<IQuantizer>& m_pQuantizer;
+            const std::shared_ptr<IQuantizer> m_pQuantizer;
 
             KmeansArgs(int k, DimensionType dim, SizeType datasize, int threadnum, DistCalcMethod distMethod, const std::shared_ptr<IQuantizer>& quantizer = nullptr) : _K(k), _DK(k), _D(dim), _RD(dim), _T(threadnum), _M(distMethod), m_pQuantizer(quantizer){
                 if (m_pQuantizer) {
@@ -652,6 +654,29 @@ break;
                 return SaveTrees(ptr);
             }
 
+            ErrorCode SaveTrees(int cid, int fd) const {
+                std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
+                // IOBINARY(p_out, WriteBinary, sizeof(m_iTreeNumber), (char*)&m_iTreeNumber);
+                dfs_write(cid, fd, &m_iTreeNumber, sizeof(m_iTreeNumber));
+                // IOBINARY(p_out, WriteBinary, sizeof(SizeType) * m_iTreeNumber, (char*)m_pTreeStart.data());
+                dfs_write(cid, fd, m_pTreeStart.data(), sizeof(SizeType) * m_iTreeNumber);
+                SizeType treeNodeSize = (SizeType)m_pTreeRoots.size();
+                // IOBINARY(p_out, WriteBinary, sizeof(treeNodeSize), (char*)&treeNodeSize);
+                dfs_write(cid, fd, &treeNodeSize, sizeof(treeNodeSize));
+                // IOBINARY(p_out, WriteBinary, sizeof(BKTNode) * treeNodeSize, (char*)m_pTreeRoots.data());
+                dfs_write(cid, fd, m_pTreeRoots.data(), sizeof(BKTNode) * treeNodeSize);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFS: Save BKT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
+                return ErrorCode::Success;
+            }
+
+            ErrorCode SaveTrees(int cid, std::string sTreeFileName) const
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFS: Save BKT to %s\n", sTreeFileName.c_str());
+                int fd = dfs_open(cid, sTreeFileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                if (fd < 0) return ErrorCode::FailedCreateFile;
+                return SaveTrees(cid, fd);
+            }
+
             ErrorCode LoadTrees(char* pBKTMemFile)
             {
                 m_iTreeNumber = *((int*)pBKTMemFile);
@@ -691,6 +716,32 @@ break;
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(sTreeFileName.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
                 return LoadTrees(ptr);
+            }
+
+            ErrorCode LoadTrees(int cid, int fd) {
+                dfs_read(cid, fd, &m_iTreeNumber, sizeof(m_iTreeNumber));
+                m_pTreeStart.resize(m_iTreeNumber);
+                dfs_read(cid, fd, m_pTreeStart.data(), sizeof(SizeType) * m_iTreeNumber);
+
+                SizeType treeNodeSize;
+                dfs_read(cid, fd, &treeNodeSize, sizeof(treeNodeSize));
+                m_pTreeRoots.resize(treeNodeSize);
+                dfs_read(cid, fd, m_pTreeRoots.data(), sizeof(BKTNode) * treeNodeSize);
+
+                if (m_pTreeRoots.size() > 0 && m_pTreeRoots.back().centerid != -1) m_pTreeRoots.emplace_back(-1);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFS: Load BKT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
+                return ErrorCode::Success;
+            }
+
+            ErrorCode LoadTrees(int cid, std::string sTreeFileName)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFS: Load BKT From %s\n", sTreeFileName.c_str());
+                int fd = dfs_open(cid, sTreeFileName.c_str(), O_RDONLY, 0644);
+                if (fd < 0) {
+                    // SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "LeoFS: Failed to open file %s\n", sTreeFileName.c_str());
+                    return ErrorCode::FailedOpenFile;
+                }
+                return LoadTrees(cid, fd);
             }
 
             template <typename T>

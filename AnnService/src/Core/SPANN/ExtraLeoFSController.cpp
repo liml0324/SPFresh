@@ -4,7 +4,10 @@ namespace SPTAG::SPANN
 {
 thread_local struct LeoFSIO::BlockController::IoContext LeoFSIO::BlockController::m_currIoContext;
 thread_local int LeoFSIO::BlockController::debug_fd = -1;
+thread_local void* LeoFSIO::BlockController::aligned_buf = nullptr;
 thread_local int LeoFSIO::id = 0;
+thread_local int LeoFSIO::BlockController::cid = -1;
+thread_local int LeoFSIO::BlockController::fd = -1;
 #ifdef USE_ASYNC_IO
 thread_local uint64_t LeoFSIO::BlockController::iocp = 0;
 thread_local int LeoFSIO::BlockController::id = 0;
@@ -12,8 +15,8 @@ thread_local int LeoFSIO::BlockController::id = 0;
 std::chrono::high_resolution_clock::time_point LeoFSIO::BlockController::m_startTime;
 int LeoFSIO::BlockController::m_ssdInflight = 0;
 // std::atomic<int> LeoFSIO::BlockController::m_ioCompleteCount(0);
-int LeoFSIO::BlockController::fd = -1;
-int LeoFSIO::BlockController::cid = -1;
+// int LeoFSIO::BlockController::fd = -1;
+// int LeoFSIO::BlockController::cid = -1;
 char* LeoFSIO::BlockController::filePath = new char[1024];
 std::unique_ptr<char[]> LeoFSIO::BlockController::m_memBuffer;
 
@@ -143,6 +146,12 @@ void* LeoFSIO::BlockController::InitializeLeoFS(void* args) {
         // std::lock_guard<std::mutex> lock(ctrl->m_uniqueResourceMutex);
         // m_ssdInflight = 0;
     }
+
+    if (cid >= 0) {
+        if (fd >= 0) 
+            dfs_close(cid, fd);
+        dfs_disconnect(cid);
+    }
     pthread_exit(NULL);
 }
 
@@ -163,6 +172,27 @@ bool LeoFSIO::BlockController::Initialize(int batchSize) {
             return false;
         }
     }
+
+    const char* LeoFSConfigPath = getenv(kLeoFSConfigPath);
+    if (!LeoFSConfigPath) {
+        fprintf(stderr, "LeoFSIO::BlockController::Initialize failed: LeoFSConfigPath is not set\n");
+        return false;
+    }
+    cid = dfs_connect_config(LeoFSConfigPath);
+    if (cid < 0) {
+        fprintf(stderr, "LeoFSIO::BlockController::Initialize failed: dfs_connect_config failed\n");
+        return false;
+    }       
+
+    fd = dfs_open(cid, filePath, O_RDWR | O_DIRECT, 0666);
+    if (fd < 0) {
+        auto err_str = dfs_errno(cid);
+        fprintf(stderr, "open failed: %s\n", err_str);
+        return false;
+    }
+
+    aligned_buf = aligned_alloc(m_ssdLeoFSAlignment, PageSize);
+
     if (m_idQueue.empty()) {
         id = m_maxId;
         m_maxId++;
@@ -314,20 +344,24 @@ bool LeoFSIO::BlockController::ReadBlocks(AddressType* p_data, std::string* p_va
     //     dataIdx++;
     // }
     // std::cout << "blockNum: " << blockNum << std::endl;
+    // auto aligned_buf = aligned_alloc(PageSize, PageSize);
     for (int i = 0; i < blockNum; i++) {
         void *buf = (void*)p_value->data() + currOffset;
-        int real_size = (p_data[0] - currOffset) < PageSize ? (p_data[0] - currOffset) : PageSize;
-        int offset = p_data[dataIdx] * PageSize;
+        uint64_t real_size = (p_data[0] - currOffset) < PageSize ? (p_data[0] - currOffset) : PageSize;
+        uint64_t offset = p_data[dataIdx] * PageSize;
         // std::cout << "Address: " << p_data[dataIdx] << " Offset: " << offset << " RealSize: " << real_size << std::endl;
-        int ret = dfs_pread(cid, fd, buf, real_size, offset);
+        memset(aligned_buf, 0, PageSize);
+        int ret = dfs_pread(cid, fd, aligned_buf, real_size, offset);
         if (ret != real_size) {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "LeoFSIO::BlockController::ReadBlocks: dfs_pread failed\n");
             return false;
         }
+        memcpy(buf, aligned_buf, real_size);
         dataIdx++;
         currOffset += PageSize;
         read_complete_vec[id]++;
     }
+    // free(aligned_buf);
     // std::vector<struct io_event> events(blockNum);
     // int totalDone = 0, totalSubmitted = 0;
     // struct timespec timeout_ts {0, timeout.count() * 1000};
@@ -464,6 +498,7 @@ bool LeoFSIO::BlockController::ReadBlocks(const std::vector<AddressType*>& p_dat
     fsync(debug_fd);
 #endif
     auto t1 = std::chrono::high_resolution_clock::now();
+    // auto aligned_buf = aligned_alloc(PageSize, PageSize);
     m_batchReadTimes++;
     p_values->resize(p_data.size());
     const int batch_size = m_batchSize;
@@ -513,14 +548,20 @@ bool LeoFSIO::BlockController::ReadBlocks(const std::vector<AddressType*>& p_dat
         while(currOffset < p_data_i[0]) {
             SubIoRequest currSubIo;
             void *buf = (void*)p_value->data() + currOffset;
-            int real_size = (p_data_i[0] - currOffset) < PageSize ? (p_data_i[0] - currOffset) : PageSize;
-            int offset = p_data_i[dataIdx] * PageSize;
+            uint64_t real_size = (p_data_i[0] - currOffset) < PageSize ? (p_data_i[0] - currOffset) : PageSize;
+            uint64_t offset = p_data_i[dataIdx] * PageSize;
+            if (offset < 0) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "LeoFSIO::BlockController::ReadBlocks: offset is negative\n");
+                exit(1);
+            }
             int posting_id = i;
-            auto ret = dfs_pread(cid, fd, buf, real_size, offset);
+            memset(aligned_buf, 0, PageSize);
+            auto ret = dfs_pread(cid, fd, aligned_buf, real_size, offset);
             if (ret < 0) {
                 io_failed = true;
                 break;
             }
+            memcpy(buf, aligned_buf, real_size);
             read_submit_vec[id]++;
             currOffset += PageSize;
             dataIdx++;
@@ -531,7 +572,7 @@ bool LeoFSIO::BlockController::ReadBlocks(const std::vector<AddressType*>& p_dat
             p_value->clear();
         }
     }
-
+    // free(aligned_buf);
     // Clear timeout I/Os
     // while (m_currIoContext.free_sub_io_requests.size() < m_ssdLeoFSDepth) {
     //     int wait = m_ssdLeoFSDepth - m_currIoContext.free_sub_io_requests.size();
@@ -735,22 +776,30 @@ bool LeoFSIO::BlockController::WriteBlocks(AddressType* p_data, int p_size, cons
     // if (p_size > 1) {
     //     std::cout << "p_size: " << p_size << std::endl;
     // }
+    // auto aligned_buf = aligned_alloc(PageSize, PageSize);
     for (int i = 0; i  < p_size; i++) {
         void *buf = (void*)p_value.data() + currBlockIdx * PageSize;
-        int real_size = (PageSize * (currBlockIdx + 1)) > totalSize ? (totalSize - currBlockIdx * PageSize) : PageSize;
-        int offset = p_data[currBlockIdx] * PageSize;
+        uint64_t real_size = (PageSize * (currBlockIdx + 1)) > totalSize ? (totalSize - currBlockIdx * PageSize) : PageSize;
+        uint64_t offset = p_data[currBlockIdx] * PageSize;
+        if (offset < 0) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "LeoFSIO::BlockController::WriteBlocks: offset is negative\n");
+            exit(1);
+        }
         // if (p_size > 1) {
         //     std::cout << "real size: " << real_size << " offset: " << offset << std::endl;
         // }
-        auto ret = dfs_pwrite(cid, fd, buf, real_size, offset);
+        memset(aligned_buf, 0, PageSize);
+        memcpy(aligned_buf, buf, real_size);
+        auto ret = dfs_pwrite(cid, fd, aligned_buf, real_size, offset);
         if (ret < real_size) {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "LeoFSIO::BlockController::WriteBlocks: dfs_pwrite failed\n");
             return false;
         }
+        // dfs_fsync(cid, fd);
         currBlockIdx++;
         write_complete_vec[id]++;
     }
-
+    // free(aligned_buf);
     // std::vector<struct iocb*> iocbs(p_size);
     // for (int i = 0; i < p_size; i++) {
     //     auto currSubIo = m_currIoContext.free_sub_io_requests.front();
@@ -914,10 +963,17 @@ bool LeoFSIO::BlockController::ShutDown() {
             AddressType currBlockAddress;
             m_blockAddresses.try_pop(currBlockAddress);
         }
-        dfs_close(cid, fd);
+        // dfs_close(cid, fd);
+        // dfs_disconnect(cid);
+    }
+    if (cid >= 0) {
+        if (fd >= 0)
+            dfs_close(cid, fd);
         dfs_disconnect(cid);
     }
+    
     m_idQueue.push(id);
+    free(aligned_buf);
     // syscall(__NR_io_destroy, iocp);
     // for (auto &sr : m_currIoContext.sub_io_requests) {
     //     sr.app_buff = nullptr;

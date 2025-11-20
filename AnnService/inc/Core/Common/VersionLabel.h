@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include "Dataset.h"
+#include "leofs.h"
 
 namespace SPTAG
 {
@@ -83,6 +84,19 @@ namespace SPTAG
                 return Save(ptr);
             }
 
+            inline ErrorCode Save(int cid, int fd) {
+                SizeType deleted = m_deleted.load();
+                dfs_write(cid, fd, (char*)&deleted, sizeof(SizeType));
+                return m_data.Save(cid, fd);
+            }
+
+            inline ErrorCode Save(int cid, const std::string& filename) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFS: Save %s To %s\n", m_data.Name().c_str(), filename.c_str());
+                int fd = dfs_open(cid, filename.c_str(), O_WRONLY | O_CREAT, 0644);
+                if (fd < 0) return ErrorCode::FailedCreateFile;
+                return Save(cid, fd);
+            }
+
             inline ErrorCode Load(std::shared_ptr<Helper::DiskIO> input, SizeType blockSize, SizeType capacity)
             {
                 SizeType deleted;
@@ -103,6 +117,21 @@ namespace SPTAG
             {
                 m_deleted = *((SizeType*)pmemoryFile);
                 return m_data.Load(pmemoryFile + sizeof(SizeType), blockSize, capacity);
+            }
+
+            inline ErrorCode Load(int cid, int fd, SizeType blockSize, SizeType capacity) {
+                SizeType deleted;
+                dfs_read(cid, fd, (char*)&deleted, sizeof(SizeType));
+                m_deleted = deleted;
+                return m_data.Load(cid, fd, blockSize, capacity);
+            }
+
+            inline ErrorCode Load(int cid, const std::string& filename, SizeType blockSize, SizeType capacity)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFS: Load %s From %s\n", m_data.Name().c_str(), filename.c_str());
+                int fd = dfs_open(cid, filename.c_str(), O_RDONLY, 0644);
+                if (fd < 0) return ErrorCode::FailedOpenFile;
+                return Load(cid, fd, blockSize, capacity);
             }
 
             inline ErrorCode AddBatch(SizeType num)

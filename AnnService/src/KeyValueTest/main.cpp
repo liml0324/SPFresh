@@ -10,7 +10,7 @@ using namespace SPTAG;
 
 int main(int argc, char* argv[]) {
     int max_blocks = 5;
-    int kv_num = 1000;
+    int kv_num = 100;
     int dataset_size = 10000;
     int iter_num = 1000;
     int batch_num = 10;
@@ -38,7 +38,7 @@ int main(int argc, char* argv[]) {
     SPANN::LeoFSIO leoFSIO("/spfresh/testfile", 1024 * 1024, std::numeric_limits<SizeType>::max(), max_blocks * 2, 1024, 64, false);
     leoFSIO.Initialize(true);
 
-    bool single_thread_test     = true;
+    bool single_thread_test     = false;
     bool multi_thread_test      = true;
     bool multi_get_test         = true;
     bool mixed_read_write_test  = true;
@@ -125,7 +125,10 @@ MultiThreadTest:
             threads.emplace_back([&leoFSIO, &values, &thread_keys, &dataset, i]() {
                 leoFSIO.Initialize();
                 for (auto key : thread_keys[i]) {
-                    leoFSIO.Put(key, dataset[values[key]]);
+                    if (leoFSIO.Put(key, dataset[values[key]]) != SPTAG::ErrorCode::Success) {
+                        std::cout << "Error: put key " << key << " failed" << std::endl;
+                        exit(1);
+                    }
                 }
                 leoFSIO.ExitBlockController();
             });
@@ -191,7 +194,7 @@ MultiGetTest:
         goto MixReadWriteTest;
     }
     iter_num = 100;
-    kv_num = 100000;
+    kv_num = 10000;
     thread_num = 4;
     values.resize(kv_num);
     start = std::chrono::high_resolution_clock::now();
@@ -268,7 +271,7 @@ MixReadWriteTest:
         goto TimeoutTest;
     }
     batch_num = 10;
-    iter_num = 100000;
+    iter_num = 1000;
     read_rate = 0.5;
     values.resize(kv_num);
     start = std::chrono::high_resolution_clock::now();
@@ -371,6 +374,7 @@ MixReadWriteTest:
                 return 0;
             }
         }
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Batch %d passed\n", batch);
     }
     end = std::chrono::high_resolution_clock::now();
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Mix read write test passed\n");

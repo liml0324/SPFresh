@@ -595,6 +595,25 @@ break;
                 return ErrorCode::Success;
             }
 
+            ErrorCode LoadGraph(int cid, int fd, SizeType blockSize, SizeType capacity) {
+                ErrorCode ret = ErrorCode::Success;
+                if ((ret = m_pNeighborhoodGraph.Load(cid, fd, blockSize, capacity)) != ErrorCode::Success) return ret;
+
+                m_iGraphSize = m_pNeighborhoodGraph.R();
+                m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
+                return ErrorCode::Success;
+            }
+
+            ErrorCode LoadGraph(int cid, std::string sGraphFilename, SizeType blockSize, SizeType capacity)
+            {
+                ErrorCode ret = ErrorCode::Success;
+                if ((ret = m_pNeighborhoodGraph.Load(cid, sGraphFilename, blockSize, capacity)) != ErrorCode::Success) return ret;
+
+                m_iGraphSize = m_pNeighborhoodGraph.R();
+                m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
+                return ret;
+            }
+
             ErrorCode SaveGraph(std::string sGraphFilename) const
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", m_pNeighborhoodGraph.Name().c_str(), sGraphFilename.c_str());
@@ -611,6 +630,28 @@ break;
                 for (int i = 0; i < m_iGraphSize; i++)
                     IOBINARY(output, WriteBinary, sizeof(SizeType) * m_iNeighborhoodSize, (char*)m_pNeighborhoodGraph[i]);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save %s (%d,%d) Finish!\n", m_pNeighborhoodGraph.Name().c_str(), m_iGraphSize, m_iNeighborhoodSize);
+                return ErrorCode::Success;
+            }
+
+            ErrorCode SaveGraph(int cid, std::string sGraphFilename) const {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFS: Save %s To %s\n", m_pNeighborhoodGraph.Name().c_str(), sGraphFilename.c_str());
+                int fd = dfs_open(cid, sGraphFilename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                if (fd < 0) return ErrorCode::FailedCreateFile;
+                return SaveGraph(cid, fd);
+            }
+
+            ErrorCode SaveGraph(int cid, int fd) const
+            {
+                // IOBINARY(output, WriteBinary, sizeof(SizeType), (char*)&m_iGraphSize);
+                // IOBINARY(output, WriteBinary, sizeof(DimensionType), (char*)&m_iNeighborhoodSize);
+                dfs_write(cid, fd, (char*)&m_iGraphSize, sizeof(SizeType));
+                dfs_write(cid, fd, (char*)&m_iNeighborhoodSize, sizeof(DimensionType));
+
+                for (int i = 0; i < m_iGraphSize; i++){
+                    // IOBINARY(output, WriteBinary, sizeof(SizeType) * m_iNeighborhoodSize, (char*)m_pNeighborhoodGraph[i]);
+                    dfs_write(cid, fd, (char*)m_pNeighborhoodGraph[i], sizeof(SizeType) * m_iNeighborhoodSize);
+                }
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFS: Save %s (%d,%d) Finish!\n", m_pNeighborhoodGraph.Name().c_str(), m_iGraphSize, m_iNeighborhoodSize);
                 return ErrorCode::Success;
             }
 

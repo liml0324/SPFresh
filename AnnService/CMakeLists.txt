@@ -12,7 +12,7 @@ set(DpdkLibPrefix ${Dpdk}/lib/librte_)
 set(SPDK_LIBRARIES -Wl,--whole-archive ${SpdkLibPrefix}bdev_nvme.a ${SpdkLibPrefix}bdev.a ${SpdkLibPrefix}nvme.a ${SpdkLibPrefix}vfio_user.a ${SpdkLibPrefix}sock.a ${SpdkLibPrefix}dma.a ${SpdkLibPrefix}notify.a ${SpdkLibPrefix}accel.a ${SpdkLibPrefix}event_bdev.a ${SpdkLibPrefix}event_accel.a ${SpdkLibPrefix}vmd.a ${SpdkLibPrefix}event_vmd.a ${SpdkLibPrefix}event_sock.a ${SpdkLibPrefix}event_iobuf.a ${SpdkLibPrefix}event.a ${SpdkLibPrefix}env_dpdk.a ${SpdkLibPrefix}log.a ${SpdkLibPrefix}thread.a ${SpdkLibPrefix}rpc.a ${SpdkLibPrefix}init.a ${SpdkLibPrefix}jsonrpc.a ${SpdkLibPrefix}json.a ${SpdkLibPrefix}trace.a ${SpdkLibPrefix}util.a ${DpdkLibPrefix}mempool.a ${DpdkLibPrefix}mempool_ring.a ${DpdkLibPrefix}eal.a ${DpdkLibPrefix}ring.a ${DpdkLibPrefix}telemetry.a ${DpdkLibPrefix}bus_pci.a ${DpdkLibPrefix}kvargs.a ${DpdkLibPrefix}pci.a -Wl,--no-whole-archive dl rt isal ${IsalLCrypto} uuid)
 Set(LeoFS_LIBRARIES ${LeoFS}/libleofs_cffi.so)
 
-set(TBB_ROOT $ENV{HOME}/.local)
+set(TBB_ROOT $ENV{HOME}/.local/TBB)
 set(TBB_INCLUDE_DIRS ${TBB_ROOT}/include)
 set(TBB_LIBRARIES ${TBB_ROOT}/lib64/libtbb.so)
 include_directories(${TBB_INCLUDE_DIRS})
@@ -89,6 +89,8 @@ target_link_libraries (SPTAGLibStatic DistanceUtils ${uring_LIBRARIES} libzstd_s
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
     target_compile_options(SPTAGLibStatic PRIVATE -fPIC)
 endif()
+target_compile_options(SPTAGLibStatic PRIVATE -g)
+target_compile_options(SPTAGLib PRIVATE -g)
 
 install(TARGETS SPTAGLib SPTAGLibStatic
   RUNTIME DESTINATION bin
@@ -149,6 +151,7 @@ target_compile_definitions(ssdserving PRIVATE _exe)
 target_compile_definitions(spfresh PRIVATE _exe)
 target_compile_definitions(keyvaluetest PRIVATE _exe)
 target_compile_options(keyvaluetest PRIVATE -g)
+target_compile_options(spfresh PRIVATE -g)
 
 # for Test
 add_library(ssdservingLib ${SSD_SERVING_HDR_FILES} ${SSD_SERVING_FILES})

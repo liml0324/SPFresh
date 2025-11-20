@@ -62,8 +62,8 @@ namespace SPTAG::SPANN {
             static constexpr const char* kLeoFSPath = "SPFRESH_LEOFS_IO_PATH";
             static constexpr const char* kLeoFSConfigPath = "SPFRESH_LEOFS_IO_CONFIG_PATH";
             static char* filePath;
-            static int fd;
-            static int cid;
+            static thread_local int fd;
+            static thread_local int cid;
 
             static constexpr AddressType kSsdImplMaxNumBlocks = (300ULL << 30) >> PageSizeEx; // 300G
             static constexpr const char* kLeoFSDepth = "SPFRESH_LEOFS_IO_DEPTH";
@@ -96,6 +96,8 @@ namespace SPTAG::SPANN {
                 BlockController* ctrl;
                 int posting_id;
             };
+
+            static thread_local void* aligned_buf;
             tbb::concurrent_queue<SubIoRequest *> m_submittedSubIoRequests;
             struct IoContext {
                 std::vector<SubIoRequest> sub_io_requests;
@@ -182,9 +184,43 @@ namespace SPTAG::SPANN {
                 return cid;
             }
 
+            // ErrorCode Checkpoint(std::string prefix) {
+            //     std::string filename = prefix + "_blockpool";
+            //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO: saving block pool\n");
+            //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Reload reserved blocks!\n");
+            //     AddressType currBlockAddress = 0;
+            //     for (int count = 0; count < m_blockAddresses_reserve.unsafe_size(); count++) {
+            //         m_blockAddresses_reserve.try_pop(currBlockAddress);
+            //         m_blockAddresses.push(currBlockAddress);
+            //     }
+            //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Reload Finish!\n");
+            //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save blockpool To %s\n", filename.c_str());
+            //     // auto ptr = f_createIO();
+            //     int ckfd = dfs_open(cid, filename.c_str(), O_CREAT | O_RDWR, 0644);
+            //     if (ckfd < 0) {
+            //         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to open file %s\n", filename.c_str());
+            //         return ErrorCode::FailedCreateFile;
+            //     }
+            //     // if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
+            //     int blocks = RemainBlocks();
+            //     // IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&blocks);
+            //     if (dfs_write(cid, ckfd, (char*)&blocks, sizeof(SizeType)) != sizeof(SizeType)) {
+            //         return ErrorCode::DiskIOFail;
+            //     }
+            //     for (auto it = m_blockAddresses.unsafe_begin(); it != m_blockAddresses.unsafe_end(); it++) {
+            //         // IOBINARY(ptr, WriteBinary, sizeof(AddressType), (char*)&(*it));
+            //         if (dfs_write(cid, ckfd, (char*)&(*it), sizeof(AddressType)) != sizeof(AddressType)) {
+            //             return ErrorCode::DiskIOFail;
+            //         }
+            //     }
+            //     dfs_close(cid, ckfd);
+            //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save Finish!\n");
+            //     return ErrorCode::Success;
+            // }
+
             ErrorCode Checkpoint(std::string prefix) {
                 std::string filename = prefix + "_blockpool";
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO: saving block pool\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO: saving block pool\n");
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Reload reserved blocks!\n");
                 AddressType currBlockAddress = 0;
                 for (int count = 0; count < m_blockAddresses_reserve.unsafe_size(); count++) {
@@ -193,59 +229,96 @@ namespace SPTAG::SPANN {
                 }
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Reload Finish!\n");
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save blockpool To %s\n", filename.c_str());
-                // auto ptr = f_createIO();
-                int ckfd = dfs_open(cid, filename.c_str(), O_CREAT | O_RDWR, 0644);
-                if (ckfd < 0) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to open file %s\n", filename.c_str());
-                    return ErrorCode::FailedCreateFile;
-                }
-                // if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
+                auto ptr = f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
                 int blocks = RemainBlocks();
-                // IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&blocks);
-                if (dfs_write(cid, ckfd, (char*)&blocks, sizeof(SizeType)) != sizeof(SizeType)) {
-                    return ErrorCode::DiskIOFail;
-                }
+                IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&blocks);
                 for (auto it = m_blockAddresses.unsafe_begin(); it != m_blockAddresses.unsafe_end(); it++) {
-                    // IOBINARY(ptr, WriteBinary, sizeof(AddressType), (char*)&(*it));
-                    if (dfs_write(cid, ckfd, (char*)&(*it), sizeof(AddressType)) != sizeof(AddressType)) {
-                        return ErrorCode::DiskIOFail;
-                    }
+                    IOBINARY(ptr, WriteBinary, sizeof(AddressType), (char*)&(*it));
                 }
-                dfs_close(cid, ckfd);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save Finish!\n");
                 return ErrorCode::Success;
             }
 
+            // ErrorCode Recovery(std::string prefix, int batchSize) {
+            //     std::lock_guard<std::mutex> lock(m_initMutex);
+            //     m_numInitCalled++;
+            //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO Recovery: Loading block pool\n");
+            //     std::string filename = prefix + "_blockpool";
+            //     // auto ptr = f_createIO();
+            //     int rcfd = dfs_open(cid, filename.c_str(), O_RDONLY, 0644);
+            //     // if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::in)) {
+            //     //     return ErrorCode::FailedCreateFile;
+            //     // }
+            //     if (rcfd < 0) {
+            //         return ErrorCode::FailedCreateFile;
+            //     }
+            //     int blocks;
+            //     // IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&blocks);
+            //     if (dfs_read(cid, rcfd, (char*)&blocks, sizeof(SizeType)) != sizeof(SizeType)) {
+            //         return ErrorCode::DiskIOFail;
+            //     }
+            //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO Recovery: Reading %d blocks to pool\n", blocks);
+            //     AddressType currBlockAddress = 0;
+            //     for (int i = 0; i < blocks; i++) {
+            //         // IOBINARY(ptr, ReadBinary, sizeof(AddressType), (char*)&(currBlockAddress));
+            //         if (dfs_read(cid, rcfd, (char*)&currBlockAddress, sizeof(AddressType)) != sizeof(AddressType)) {
+            //             return ErrorCode::DiskIOFail;
+            //         }
+            //         m_blockAddresses.push(currBlockAddress);
+            //     }
+            //     dfs_close(cid, rcfd);
+
+            //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO Recovery: Initializing LeoFSIO\n");
+                
+            //     if (m_numInitCalled == 1) {
+            //         m_batchSize = batchSize;
+            //         pthread_create(&m_LeoFSTid, NULL, &InitializeLeoFS, this);
+            //         while(!m_LeoFSThreadReady && !m_LeoFSThreadStartFailed);
+            //         if (m_LeoFSThreadStartFailed) {
+            //             fprintf(stderr, "SPDKIO::BlockController::Initialize failed\n");
+            //             return ErrorCode::Fail;
+            //         }
+            //     }
+            //     // Create sub I/O request pool
+            //     m_currIoContext.sub_io_requests.resize(m_ssdLeoFSDepth);
+            //     m_currIoContext.in_flight = 0;
+            //     for (auto &sr : m_currIoContext.sub_io_requests) {
+            //         sr.app_buff = nullptr;
+            //         auto buf_ptr = aligned_alloc(m_ssdLeoFSAlignment, PageSize);
+            //         if (buf_ptr == nullptr) {
+            //             fprintf(stderr, "LeoFSIO::BlockController::Initialize failed: aligned_alloc failed\n");
+            //             return ErrorCode::Fail;
+            //         }
+            //         sr.myiocb.aio_buf = reinterpret_cast<uint64_t>(buf_ptr);
+            //         sr.myiocb.aio_fildes = fd;
+            //         sr.myiocb.aio_data = reinterpret_cast<uintptr_t>(&sr);
+            //         sr.myiocb.aio_nbytes = PageSize;
+            //         sr.ctrl = this;
+            //         m_currIoContext.free_sub_io_requests.push(&sr);
+            //     }
+            //     return ErrorCode::Success;
+            // }
+
             ErrorCode Recovery(std::string prefix, int batchSize) {
                 std::lock_guard<std::mutex> lock(m_initMutex);
                 m_numInitCalled++;
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO Recovery: Loading block pool\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO Recovery: Loading block pool\n");
                 std::string filename = prefix + "_blockpool";
-                // auto ptr = f_createIO();
-                int rcfd = dfs_open(cid, filename.c_str(), O_RDONLY, 0644);
-                // if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::in)) {
-                //     return ErrorCode::FailedCreateFile;
-                // }
-                if (rcfd < 0) {
+                auto ptr = f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::in)) {
                     return ErrorCode::FailedCreateFile;
                 }
                 int blocks;
-                // IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&blocks);
-                if (dfs_read(cid, rcfd, (char*)&blocks, sizeof(SizeType)) != sizeof(SizeType)) {
-                    return ErrorCode::DiskIOFail;
-                }
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO Recovery: Reading %d blocks to pool\n", blocks);
+                IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&blocks);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO Recovery: Reading %d blocks to pool\n", blocks);
                 AddressType currBlockAddress = 0;
                 for (int i = 0; i < blocks; i++) {
-                    // IOBINARY(ptr, ReadBinary, sizeof(AddressType), (char*)&(currBlockAddress));
-                    if (dfs_read(cid, rcfd, (char*)&currBlockAddress, sizeof(AddressType)) != sizeof(AddressType)) {
-                        return ErrorCode::DiskIOFail;
-                    }
+                    IOBINARY(ptr, ReadBinary, sizeof(AddressType), (char*)&(currBlockAddress));
                     m_blockAddresses.push(currBlockAddress);
                 }
-                dfs_close(cid, rcfd);
 
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO Recovery: Initializing LeoFSIO\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO Recovery: Initializing FileIO\n");
                 
                 if (m_numInitCalled == 1) {
                     m_batchSize = batchSize;
@@ -257,22 +330,22 @@ namespace SPTAG::SPANN {
                     }
                 }
                 // Create sub I/O request pool
-                m_currIoContext.sub_io_requests.resize(m_ssdLeoFSDepth);
-                m_currIoContext.in_flight = 0;
-                for (auto &sr : m_currIoContext.sub_io_requests) {
-                    sr.app_buff = nullptr;
-                    auto buf_ptr = aligned_alloc(m_ssdLeoFSAlignment, PageSize);
-                    if (buf_ptr == nullptr) {
-                        fprintf(stderr, "LeoFSIO::BlockController::Initialize failed: aligned_alloc failed\n");
-                        return ErrorCode::Fail;
-                    }
-                    sr.myiocb.aio_buf = reinterpret_cast<uint64_t>(buf_ptr);
-                    sr.myiocb.aio_fildes = fd;
-                    sr.myiocb.aio_data = reinterpret_cast<uintptr_t>(&sr);
-                    sr.myiocb.aio_nbytes = PageSize;
-                    sr.ctrl = this;
-                    m_currIoContext.free_sub_io_requests.push(&sr);
-                }
+                // m_currIoContext.sub_io_requests.resize(m_ssdLeoFSDepth);
+                // m_currIoContext.in_flight = 0;
+                // for (auto &sr : m_currIoContext.sub_io_requests) {
+                //     sr.app_buff = nullptr;
+                //     auto buf_ptr = aligned_alloc(m_ssdLeoFSAlignment, PageSize);
+                //     if (buf_ptr == nullptr) {
+                //         fprintf(stderr, "FileIO::BlockController::Initialize failed: aligned_alloc failed\n");
+                //         return ErrorCode::Fail;
+                //     }
+                //     sr.myiocb.aio_buf = reinterpret_cast<uint64_t>(buf_ptr);
+                //     sr.myiocb.aio_fildes = fd;
+                //     sr.myiocb.aio_data = reinterpret_cast<uintptr_t>(&sr);
+                //     sr.myiocb.aio_nbytes = PageSize;
+                //     sr.ctrl = this;
+                //     m_currIoContext.free_sub_io_requests.push(&sr);
+                // }
                 return ErrorCode::Success;
             }
         };
@@ -532,9 +605,9 @@ namespace SPTAG::SPANN {
             } else {
                 m_pBlockMapping.Initialize(0, 1, blockSize, capacity);
             }
-            m_writeCount.resize(m_pBlockMapping.R());
-            m_readCount.resize(m_pBlockMapping.R());
-            m_mergeCount.resize(m_pBlockMapping.R());
+            // m_writeCount.resize(m_pBlockMapping.R());
+            // m_readCount.resize(m_pBlockMapping.R());
+            // m_mergeCount.resize(m_pBlockMapping.R());
 
             for (int i = 0; i < bufferSize; i++) {
                 m_buffer.push((uintptr_t)(new AddressType[m_blockLimit]));
@@ -647,7 +720,7 @@ namespace SPTAG::SPANN {
             }
             if (key >= r) return ErrorCode::Fail;
 
-            m_readCount[key]++;
+            // m_readCount[key]++;
             if (m_LeoFSUseCache) {
                 auto size = ((AddressType*)At(key))[0];
                 value->resize(size);
@@ -693,7 +766,7 @@ namespace SPTAG::SPANN {
             }
             if (key >= r) return ErrorCode::Fail;
 
-            m_readCount[key]++;
+            // m_readCount[key]++;
             if (m_LeoFSUseCache) {
                 auto size = ((AddressType*)At(key))[0];
                 value->resize(size);
@@ -744,7 +817,7 @@ namespace SPTAG::SPANN {
             values->resize(keys.size());
             int i = 0;
             for (SizeType key : keys) {
-                m_readCount[key]++;
+                // m_readCount[key]++;
                 if (m_LeoFSUseLock) {
                     m_updateMutex.lock_shared();
                     r = m_pBlockMapping.R();
@@ -844,13 +917,13 @@ namespace SPTAG::SPANN {
                 delta = key + 1 - m_pBlockMapping.R();
                 if (delta > 0) {
                     m_pBlockMapping.AddBatch(delta);
-                    m_readCount.resize(m_readCount.size() + delta, 0);
-                    m_writeCount.resize(m_writeCount.size() + delta, 0);
-                    m_mergeCount.resize(m_mergeCount.size() + delta, 0);
+                    // m_readCount.resize(m_readCount.size() + delta, 0);
+                    // m_writeCount.resize(m_writeCount.size() + delta, 0);
+                    // m_mergeCount.resize(m_mergeCount.size() + delta, 0);
                 }
                 m_updateMutex.unlock();
             }
-            m_writeCount[key]++;
+            // m_writeCount[key]++;
 
             if (m_LeoFSUseCache) {
                 m_pShardedLRUCache->put(key, (void *)(value.data()), value.size());
@@ -1000,7 +1073,7 @@ namespace SPTAG::SPANN {
             
             int64_t* postingSize = (int64_t*)At(key);
 
-            m_mergeCount[key]++;
+            // m_mergeCount[key]++;
             if (m_LeoFSUseCache) {
                 m_pShardedLRUCache->merge(key, (void *)(value.data()), value.size());
             }
@@ -1122,96 +1195,136 @@ namespace SPTAG::SPANN {
             m_pBlockController.IOStatistics();
         }
 
-        ErrorCode PrintHotColdStat() {
-            std::string filePath = "hotcold" + std::to_string(m_hotColdStatNo) + ".txt";
-            m_hotColdStatNo++;
-            std::ofstream fout(filePath);
-            if (!fout.is_open()) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Print hot/cold stat: Failed to open file %s\n", filePath.c_str());
-                return ErrorCode::Fail;
-            }
-            fout << "Read Stat:" << std::endl;
-            for (int i = 0; i < m_readCount.size(); i++) {
-                fout << i << " " << m_readCount[i] << std::endl;
-            }
-            fout << "Write Stat:" << std::endl;
-            for (int i = 0; i < m_writeCount.size(); i++) {
-                fout << i << " " << m_writeCount[i] << std::endl;
-            }
-            fout << "Merge Stat:" << std::endl;
-            for (int i = 0; i < m_mergeCount.size(); i++) {
-                fout << i << " " << m_mergeCount[i] << std::endl;
-            }
-            fout.close();
-            return ErrorCode::Success;
-        }
+        // ErrorCode PrintHotColdStat() {
+        //     std::string filePath = "hotcold" + std::to_string(m_hotColdStatNo) + ".txt";
+        //     m_hotColdStatNo++;
+        //     std::ofstream fout(filePath);
+        //     if (!fout.is_open()) {
+        //         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Print hot/cold stat: Failed to open file %s\n", filePath.c_str());
+        //         return ErrorCode::Fail;
+        //     }
+        //     fout << "Read Stat:" << std::endl;
+        //     for (int i = 0; i < m_readCount.size(); i++) {
+        //         fout << i << " " << m_readCount[i] << std::endl;
+        //     }
+        //     fout << "Write Stat:" << std::endl;
+        //     for (int i = 0; i < m_writeCount.size(); i++) {
+        //         fout << i << " " << m_writeCount[i] << std::endl;
+        //     }
+        //     fout << "Merge Stat:" << std::endl;
+        //     for (int i = 0; i < m_mergeCount.size(); i++) {
+        //         fout << i << " " << m_mergeCount[i] << std::endl;
+        //     }
+        //     fout.close();
+        //     return ErrorCode::Success;
+        // }
+
+        // ErrorCode Load(std::string path, SizeType blockSize, SizeType capacity) {
+        //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load mapping From %s\n", path.c_str());
+        //     // auto ptr = f_createIO();
+        //     // if (ptr == nullptr || !ptr->Initialize(path.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
+        //     int cid = m_pBlockController.GetCid();
+        //     int ldfd = dfs_open(cid, path.c_str(), O_RDONLY, 0644);
+
+        //     SizeType CR, mycols;
+        //     // IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&CR);
+        //     // IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&mycols);
+        //     if (dfs_read(cid, ldfd, (char*)&CR, sizeof(SizeType)) != sizeof(SizeType)) {
+        //         return ErrorCode::DiskIOFail;
+        //     }
+        //     if (dfs_read(cid, ldfd, (char*)&mycols, sizeof(SizeType)) != sizeof(SizeType)) {
+        //         return ErrorCode::DiskIOFail;
+        //     }
+        //     if (mycols > m_blockLimit) m_blockLimit = mycols;
+
+        //     m_pBlockMapping.Initialize(CR, 1, blockSize, capacity);
+        //     for (int i = 0; i < CR; i++) {
+        //         At(i) = (uintptr_t)(new AddressType[m_blockLimit]);
+        //         // IOBINARY(ptr, ReadBinary, sizeof(AddressType) * mycols, (char*)At(i));
+        //         if (dfs_read(cid, ldfd, (char*)At(i), sizeof(AddressType) * mycols) != sizeof(AddressType) * mycols) {
+        //             return ErrorCode::DiskIOFail;
+        //         }
+        //     }
+        //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load mapping (%d,%d) Finish!\n", CR, mycols);
+        //     return ErrorCode::Success;
+        // }
 
         ErrorCode Load(std::string path, SizeType blockSize, SizeType capacity) {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load mapping From %s\n", path.c_str());
-            // auto ptr = f_createIO();
-            // if (ptr == nullptr || !ptr->Initialize(path.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
-            int cid = m_pBlockController.GetCid();
-            int ldfd = dfs_open(cid, path.c_str(), O_RDONLY, 0644);
+            auto ptr = f_createIO();
+            if (ptr == nullptr || !ptr->Initialize(path.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
 
             SizeType CR, mycols;
-            // IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&CR);
-            // IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&mycols);
-            if (dfs_read(cid, ldfd, (char*)&CR, sizeof(SizeType)) != sizeof(SizeType)) {
-                return ErrorCode::DiskIOFail;
-            }
-            if (dfs_read(cid, ldfd, (char*)&mycols, sizeof(SizeType)) != sizeof(SizeType)) {
-                return ErrorCode::DiskIOFail;
-            }
+            IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&CR);
+            IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&mycols);
             if (mycols > m_blockLimit) m_blockLimit = mycols;
 
             m_pBlockMapping.Initialize(CR, 1, blockSize, capacity);
             for (int i = 0; i < CR; i++) {
                 At(i) = (uintptr_t)(new AddressType[m_blockLimit]);
-                // IOBINARY(ptr, ReadBinary, sizeof(AddressType) * mycols, (char*)At(i));
-                if (dfs_read(cid, ldfd, (char*)At(i), sizeof(AddressType) * mycols) != sizeof(AddressType) * mycols) {
-                    return ErrorCode::DiskIOFail;
-                }
+                IOBINARY(ptr, ReadBinary, sizeof(AddressType) * mycols, (char*)At(i));
             }
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load mapping (%d,%d) Finish!\n", CR, mycols);
             return ErrorCode::Success;
         }
         
+        // ErrorCode Save(std::string path) {
+        //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save mapping To %s\n", path.c_str());
+        //     // auto ptr = f_createIO();
+        //     // if (ptr == nullptr || !ptr->Initialize(path.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
+        //     int cid = m_pBlockController.GetCid();
+        //     int svfd = dfs_open(cid, path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        //     SizeType CR = m_pBlockMapping.R();
+        //     // IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&CR);
+        //     if (dfs_write(cid, svfd, (char*)&CR, sizeof(SizeType)) != sizeof(SizeType)) {
+        //         return ErrorCode::DiskIOFail;
+        //     }
+        //     // IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&m_blockLimit);
+        //     if (dfs_write(cid, svfd, (char*)&m_blockLimit, sizeof(SizeType)) != sizeof(SizeType)) {
+        //         return ErrorCode::DiskIOFail;
+        //     }
+        //     std::vector<AddressType> empty(m_blockLimit, 0xffffffffffffffff);
+        //     for (int i = 0; i < CR; i++) {
+        //         if (At(i) == 0xffffffffffffffff) {
+        //             // IOBINARY(ptr, WriteBinary, sizeof(AddressType) * m_blockLimit, (char*)(empty.data()));
+        //             if (dfs_write(cid, svfd, (char*)(empty.data()), sizeof(AddressType) * m_blockLimit) != sizeof(AddressType) * m_blockLimit) {
+        //                 return ErrorCode::DiskIOFail;
+        //             }
+        //         }
+        //         else {
+        //             int64_t* postingSize = (int64_t*)At(i);
+        //             // IOBINARY(ptr, WriteBinary, sizeof(AddressType) * m_blockLimit, (char*)postingSize);
+        //             if (dfs_write(cid, svfd, (char*)postingSize, sizeof(AddressType) * m_blockLimit) != sizeof(AddressType) * m_blockLimit) {
+        //                 return ErrorCode::DiskIOFail;
+        //             }
+        //         }
+        //     }
+        //     dfs_close(cid, svfd);
+        //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save mapping (%d,%d) Finish!\n", CR, m_blockLimit);
+        //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin printing hot/cold stat\n");
+        //     // if (PrintHotColdStat() == ErrorCode::Success)
+        //     //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "End printing hot/cold stat\n");
+        //     return ErrorCode::Success;
+        // }
         ErrorCode Save(std::string path) {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save mapping To %s\n", path.c_str());
-            // auto ptr = f_createIO();
-            // if (ptr == nullptr || !ptr->Initialize(path.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
-            int cid = m_pBlockController.GetCid();
-            int svfd = dfs_open(cid, path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            auto ptr = f_createIO();
+            if (ptr == nullptr || !ptr->Initialize(path.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
+
             SizeType CR = m_pBlockMapping.R();
-            // IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&CR);
-            if (dfs_write(cid, svfd, (char*)&CR, sizeof(SizeType)) != sizeof(SizeType)) {
-                return ErrorCode::DiskIOFail;
-            }
-            // IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&m_blockLimit);
-            if (dfs_write(cid, svfd, (char*)&m_blockLimit, sizeof(SizeType)) != sizeof(SizeType)) {
-                return ErrorCode::DiskIOFail;
-            }
+            IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&CR);
+            IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&m_blockLimit);
             std::vector<AddressType> empty(m_blockLimit, 0xffffffffffffffff);
             for (int i = 0; i < CR; i++) {
                 if (At(i) == 0xffffffffffffffff) {
-                    // IOBINARY(ptr, WriteBinary, sizeof(AddressType) * m_blockLimit, (char*)(empty.data()));
-                    if (dfs_write(cid, svfd, (char*)(empty.data()), sizeof(AddressType) * m_blockLimit) != sizeof(AddressType) * m_blockLimit) {
-                        return ErrorCode::DiskIOFail;
-                    }
+                    IOBINARY(ptr, WriteBinary, sizeof(AddressType) * m_blockLimit, (char*)(empty.data()));
                 }
                 else {
                     int64_t* postingSize = (int64_t*)At(i);
-                    // IOBINARY(ptr, WriteBinary, sizeof(AddressType) * m_blockLimit, (char*)postingSize);
-                    if (dfs_write(cid, svfd, (char*)postingSize, sizeof(AddressType) * m_blockLimit) != sizeof(AddressType) * m_blockLimit) {
-                        return ErrorCode::DiskIOFail;
-                    }
+                    IOBINARY(ptr, WriteBinary, sizeof(AddressType) * m_blockLimit, (char*)postingSize);
                 }
             }
-            dfs_close(cid, svfd);
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save mapping (%d,%d) Finish!\n", CR, m_blockLimit);
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin printing hot/cold stat\n");
-            // if (PrintHotColdStat() == ErrorCode::Success)
-            //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "End printing hot/cold stat\n");
             return ErrorCode::Success;
         }
 
@@ -1274,9 +1387,9 @@ namespace SPTAG::SPANN {
         SizeType m_blockLimit;
         COMMON::Dataset<uintptr_t> m_pBlockMapping;
 
-        std::vector<int64_t> m_writeCount;
-        std::vector<int64_t> m_readCount;
-        std::vector<int64_t> m_mergeCount;
+        // std::vector<int64_t> m_writeCount;
+        // std::vector<int64_t> m_readCount;
+        // std::vector<int64_t> m_mergeCount;
         int m_hotColdStatNo = 0;
 
         SizeType m_bufferLimit;
