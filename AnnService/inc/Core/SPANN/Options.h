@@ -111,6 +111,8 @@ namespace SPTAG {
             bool m_enableWAL;
             bool m_checkpointTest;
             bool m_recoveryTest;
+            bool m_saveToLeoFS;
+            bool m_recoverFromLeoFS;
 
             // GPU building
             int m_gpuSSDNumTrees;

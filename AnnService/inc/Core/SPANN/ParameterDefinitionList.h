@@ -109,6 +109,8 @@ DefineSSDParameter(m_bufferLength, int, 3, "BufferLength")
 DefineSSDParameter(m_enableWAL, bool, false, "EnableWAL")
 DefineSSDParameter(m_checkpointTest, bool, false, "CheckpointTest")
 DefineSSDParameter(m_recoveryTest, bool, false, "RecoveryTest")
+DefineSSDParameter(m_saveToLeoFS, bool, false, "SaveToLeoFS")
+DefineSSDParameter(m_recoverFromLeoFS, bool, false, "RecoverFromLeoFS")
 
 // GPU Building
 DefineSSDParameter(m_gpuSSDNumTrees, int, 100, "GPUSSDNumTrees")
