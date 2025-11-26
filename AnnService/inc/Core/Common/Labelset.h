@@ -149,6 +149,15 @@ namespace SPTAG
                 // return Load(ptr, blockSize, capacity, invalidIDBehaviorSetting);
             }
 
+            inline ErrorCode Load(std::shared_ptr<Helper::DFSIO> input, SizeType blockSize, SizeType capacity, InvalidIDBehavior invalidIDBehaviorSetting = InvalidIDBehavior::Passthrough)
+            {
+                m_invalidIDBehaviorSetting = invalidIDBehaviorSetting;
+                SizeType deleted;
+                IOBINARY(input, ReadBinary, sizeof(SizeType), (char*)&deleted);
+                m_inserted = deleted;
+                return m_data.Load(input, blockSize, capacity);
+            }
+
             inline ErrorCode AddBatch(SizeType num)
             {
                 return m_data.AddBatch(num);

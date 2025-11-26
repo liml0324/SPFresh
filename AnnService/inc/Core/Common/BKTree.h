@@ -744,6 +744,22 @@ break;
                 return LoadTrees(cid, fd);
             }
 
+            ErrorCode LoadTrees(std::shared_ptr<Helper::DFSIO> p_input)
+            {
+                IOBINARY(p_input, ReadBinary, sizeof(m_iTreeNumber), (char*)&m_iTreeNumber);
+                m_pTreeStart.resize(m_iTreeNumber);
+                IOBINARY(p_input, ReadBinary, sizeof(SizeType) * m_iTreeNumber, (char*)m_pTreeStart.data());
+
+                SizeType treeNodeSize;
+                IOBINARY(p_input, ReadBinary, sizeof(treeNodeSize), (char*)&treeNodeSize);
+                m_pTreeRoots.resize(treeNodeSize);
+                IOBINARY(p_input, ReadBinary, sizeof(BKTNode) * treeNodeSize, (char*)m_pTreeRoots.data());
+
+                if (m_pTreeRoots.size() > 0 && m_pTreeRoots.back().centerid != -1) m_pTreeRoots.emplace_back(-1);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load BKT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
+                return ErrorCode::Success;
+            }
+
             template <typename T>
             void InitSearchTrees(const Dataset<T>& data, std::function<float(const T*, const T*, DimensionType)> fComputeDistance, COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
             {

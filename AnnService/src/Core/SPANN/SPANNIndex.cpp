@@ -140,17 +140,32 @@ namespace SPTAG
                 for (auto file : *headfiles) {
                     files->push_back(filename + FolderSep + file);
                 }
-                std::vector<std::shared_ptr<Helper::DiskIO>> handles;
-                for (std::string& f : *files) {
-                    auto ptr = SPTAG::f_createIO();
-                    if (ptr == nullptr || !ptr->Initialize(f.c_str(), std::ios::binary | std::ios::in)) {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open file %s!\n", f.c_str());
-                        ptr = nullptr;
+                if (m_options.m_recoverFromLeoFS) {
+                    std::vector<std::shared_ptr<Helper::DFSIO>> handles;
+                    for (std::string& f : *files) {
+                        auto ptr = SPTAG::f_createDFSIO();
+                        if (ptr == nullptr || !ptr->Initialize(-1, m_options.m_leoFSConfigPath.c_str(), f.c_str(), std::ios::binary | std::ios::in)) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open file %s!\n", f.c_str());
+                            ptr = nullptr;
+                        }
+                        handles.push_back(std::move(ptr));
                     }
-                    handles.push_back(std::move(ptr));
+                    m_index->LoadIndexData(handles);
                 }
-                // 让底下的index（默认是BKT index）去加载这些文件
-                m_index->LoadIndexData(handles);
+                else {
+                    std::vector<std::shared_ptr<Helper::DiskIO>> handles;
+                    for (std::string& f : *files) {
+                        auto ptr = SPTAG::f_createIO();
+                        if (ptr == nullptr || !ptr->Initialize(f.c_str(), std::ios::binary | std::ios::in)) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open file %s!\n", f.c_str());
+                            ptr = nullptr;
+                        }
+                        handles.push_back(std::move(ptr));
+                    }
+                    // 让底下的index（默认是BKT index）去加载这些文件
+                    m_index->LoadIndexData(handles);
+                }
+                
             } else if (m_index->LoadIndexData(p_indexStreams) != ErrorCode::Success) return ErrorCode::Fail;
 
             m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));

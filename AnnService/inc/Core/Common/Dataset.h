@@ -457,6 +457,19 @@ namespace SPTAG
                 return Load(cid, fd, blockSize, capacity);
             }
 
+            ErrorCode Load(std::shared_ptr<Helper::DFSIO> pInput, SizeType blockSize, SizeType capacity) {
+                IOBINARY(pInput, ReadBinary, sizeof(SizeType), (char*)&(rows));
+                IOBINARY(pInput, ReadBinary, sizeof(DimensionType), (char*)&mycols);
+
+                if (data == nullptr) Initialize(rows, mycols, blockSize, capacity);
+
+                for (SizeType i = 0; i < rows; i++) {
+                    IOBINARY(pInput, ReadBinary, sizeof(T) * mycols, (char*)At(i));
+                }
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load %s (%d,%d) Finish!\n", name.c_str(), rows, mycols);
+                return ErrorCode::Success;
+            }
+
             ErrorCode Refine(const std::vector<SizeType>& indices, COMMON::Dataset<T>& dataset) const
             {
                 SizeType newrows = (SizeType)(indices.size());

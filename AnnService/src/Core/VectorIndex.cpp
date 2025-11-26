@@ -44,6 +44,8 @@ std::mt19937 SPTAG::rg;
 
 std::shared_ptr<Helper::DiskIO>(*SPTAG::f_createIO)() = []() -> std::shared_ptr<Helper::DiskIO> { return std::shared_ptr<Helper::DiskIO>(new Helper::SimpleFileIO()); };
 
+std::shared_ptr<Helper::DFSIO>(*SPTAG::f_createDFSIO)() = []() -> std::shared_ptr<Helper::DFSIO> { return std::shared_ptr<Helper::DFSIO>(new Helper::SimpleLeoFSIO()); };
+
 namespace SPTAG {
 
     bool copyfile(const char* oldpath, const char* newpath) {

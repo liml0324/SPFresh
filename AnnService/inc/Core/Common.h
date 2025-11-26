@@ -22,6 +22,7 @@
 #include <cmath>
 #include "inc/Helper/Logging.h"
 #include "inc/Helper/DiskIO.h"
+#include "inc/Helper/DFSIO.h"
 
 #ifndef _MSC_VER
 #include <stdio.h>
@@ -141,6 +142,7 @@ const int PageSizeEx = 12;
 extern std::mt19937 rg;
 
 extern std::shared_ptr<Helper::DiskIO>(*f_createIO)();
+extern std::shared_ptr<Helper::DFSIO>(*f_createDFSIO)();
 
 #define IOBINARY(ptr, func, bytes, ...) if (ptr->func(bytes, __VA_ARGS__) != bytes) return ErrorCode::DiskIOFail
 #define IOSTRING(ptr, func, ...) if (ptr->func(__VA_ARGS__) == 0) return ErrorCode::DiskIOFail

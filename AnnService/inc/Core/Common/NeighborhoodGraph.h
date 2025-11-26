@@ -614,6 +614,16 @@ break;
                 return ret;
             }
 
+            ErrorCode LoadGraph(std::shared_ptr<Helper::DFSIO> input, SizeType blockSize, SizeType capacity)
+            {
+                ErrorCode ret = ErrorCode::Success;
+                if ((ret = m_pNeighborhoodGraph.Load(input, blockSize, capacity)) != ErrorCode::Success) return ret;
+
+                m_iGraphSize = m_pNeighborhoodGraph.R();
+                m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
+                return ret;
+            }
+
             ErrorCode SaveGraph(std::string sGraphFilename) const
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", m_pNeighborhoodGraph.Name().c_str(), sGraphFilename.c_str());

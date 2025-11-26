@@ -107,6 +107,28 @@ namespace SPTAG
         }
 
         template <typename T>
+        ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::DFSIO>> &p_indexStreams) {
+            if (p_indexStreams.size() < 4) return ErrorCode::LackOfInputs;
+
+            ErrorCode ret = ErrorCode::Success;
+            if (p_indexStreams[0] == nullptr || (ret = m_pSamples.Load(p_indexStreams[0], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
+            if (p_indexStreams[1] == nullptr || (ret = m_pTrees.LoadTrees(p_indexStreams[1])) != ErrorCode::Success) return ret;
+            if (p_indexStreams[2] == nullptr || (ret = m_pGraph.LoadGraph(p_indexStreams[2], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
+            if (p_indexStreams[3] == nullptr) m_deletedID.Initialize(m_pSamples.R(), m_iDataBlockSize, m_iDataCapacity, COMMON::Labelset::InvalidIDBehavior::AlwaysContains);
+            else if ((ret = m_deletedID.Load(p_indexStreams[3], m_iDataBlockSize, m_iDataCapacity, COMMON::Labelset::InvalidIDBehavior::AlwaysContains)) != ErrorCode::Success) return ret;
+
+            if (m_pSamples.R() != m_pGraph.R() || m_pSamples.R() != m_deletedID.R())
+            {
+                SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Error, "Index data is corrupted, please rebuild the index. Samples: %i, Graph: %i, DeletedID: %i.", m_pSamples.R(), m_pGraph.R(), m_deletedID.R());
+                return ErrorCode::FailedParseValue;
+            }
+
+            omp_set_num_threads(m_iNumberOfThreads);
+            m_threadPool.init();
+            return ret;
+        }
+
+        template <typename T>
         ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::DiskIO> p_configOut)
         {
             auto workspace = m_workSpaceFactory->GetWorkSpace();

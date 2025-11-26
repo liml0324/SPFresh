@@ -113,6 +113,7 @@ namespace SPTAG {
             bool m_recoveryTest;
             bool m_saveToLeoFS;
             bool m_recoverFromLeoFS;
+            std::string m_leoFSConfigPath;
 
             // GPU building
             int m_gpuSSDNumTrees;
