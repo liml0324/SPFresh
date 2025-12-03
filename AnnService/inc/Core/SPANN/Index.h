@@ -126,6 +126,9 @@ namespace SPTAG
 
             ErrorCode LoadConfig(Helper::IniReader& p_reader);
             ErrorCode LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams);
+            ErrorCode LoadIndexData(const std::vector<std::shared_ptr<Helper::DFSIO>>& p_indexStreams) {
+                return ErrorCode::Undefined;
+            };
             ErrorCode LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs);
 
             ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized = false, bool p_shareOwnership = false);

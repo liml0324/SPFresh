@@ -165,6 +165,8 @@ public:
 
     virtual ErrorCode LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams) = 0;
 
+    virtual ErrorCode LoadIndexData(const std::vector<std::shared_ptr<Helper::DFSIO>>& p_indexStreams) = 0;
+
     virtual ErrorCode LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs) = 0;
 
     virtual ErrorCode DeleteIndex(const SizeType& p_id) = 0;

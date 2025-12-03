@@ -16,49 +16,12 @@
 #include <tbb/concurrent_queue.h>
 #include <tbb/concurrent_hash_map.h>
 #include <sys/syscall.h>
-#include <linux/aio_abi.h>
 #include <list>
 namespace SPTAG::SPANN {
     typedef std::int64_t AddressType;
     class LeoFSIO : public Helper::KeyValueIO {
         class BlockController {
         private:
-            // class RWThreadPool : public Helper::ThreadPool {
-            //     public:
-            //     class Job : public Helper::ThreadPool::Job {
-            //         public:
-            //             void *app_buff;
-            //             int nbytes;
-            //             int cid;
-            //             int fd;
-            //             uint64_t offset;
-            //             bool is_read;
-            //             Job(void *app_buff, int nbytes, int cid, int fd, uint64_t offset, bool is_read) {
-            //                 this->app_buff = app_buff;
-            //                 this->nbytes = nbytes;
-            //                 this->cid = cid;
-            //                 this->fd = fd;
-            //                 this->offset = offset;
-            //                 this->is_read = is_read;
-            //             }
-            //             void exec(IAbortOperation* p_abort) override {
-            //                 if (p_abort->ShouldAbort()) {
-            //                     return;
-            //                 }
-            //                 if (is_read) {
-            //                     if (dfs_pread(cid, fd, app_buff, nbytes, offset) != nbytes) {
-            //                         throw std::runtime_error("dfs pread error");
-            //                     }
-            //                 } else {
-            //                     if (dfs_pwrite(cid, fd, app_buff, nbytes, offset) != nbytes) {
-            //                         throw std::runtime_error("dfs pwrite error");
-            //                     }
-            //                 }
-            //                 return;
-            //             }
-            //     };
-            // };
-
             static constexpr const char* kLeoFSPath = "SPFRESH_LEOFS_IO_PATH";
             static constexpr const char* kLeoFSConfigPath = "SPFRESH_LEOFS_IO_CONFIG_PATH";
             static char* filePath;
@@ -89,7 +52,7 @@ namespace SPTAG::SPANN {
             int m_ssdLeoFSDepth = kSsdLeoFSDefaultIoDepth;
             int m_ssdLeoFSThreadNum = kSsdLeoFSDefaultIoThreadNum;
             struct SubIoRequest {
-                struct iocb myiocb;
+                dfs_iocb myiocb;
                 AddressType real_size;
                 AddressType offset;
                 void* app_buff;
@@ -168,6 +131,8 @@ namespace SPTAG::SPANN {
 
             bool ReadBlocks(const std::vector<AddressType*>& p_data, std::vector<ByteArray>& p_value, const std::chrono::microseconds &timeout = std::chrono::microseconds::max());
 
+            bool ReadBlocksAsync(const std::vector<AddressType*>& p_data, std::vector<std::string>* p_values, const std::chrono::microseconds &timeout = std::chrono::microseconds::max());
+
             bool WriteBlocks(AddressType* p_data, int p_size, const std::string& p_value);
 
             bool WriteBlocks(AddressType* p_data, int p_size, const ByteArray& p_value);
@@ -184,41 +149,8 @@ namespace SPTAG::SPANN {
                 return cid;
             }
 
-            // ErrorCode Checkpoint(std::string prefix) {
-            //     std::string filename = prefix + "_blockpool";
-            //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO: saving block pool\n");
-            //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Reload reserved blocks!\n");
-            //     AddressType currBlockAddress = 0;
-            //     for (int count = 0; count < m_blockAddresses_reserve.unsafe_size(); count++) {
-            //         m_blockAddresses_reserve.try_pop(currBlockAddress);
-            //         m_blockAddresses.push(currBlockAddress);
-            //     }
-            //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Reload Finish!\n");
-            //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save blockpool To %s\n", filename.c_str());
-            //     // auto ptr = f_createIO();
-            //     int ckfd = dfs_open(cid, filename.c_str(), O_CREAT | O_RDWR, 0644);
-            //     if (ckfd < 0) {
-            //         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to open file %s\n", filename.c_str());
-            //         return ErrorCode::FailedCreateFile;
-            //     }
-            //     // if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
-            //     int blocks = RemainBlocks();
-            //     // IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&blocks);
-            //     if (dfs_write(cid, ckfd, (char*)&blocks, sizeof(SizeType)) != sizeof(SizeType)) {
-            //         return ErrorCode::DiskIOFail;
-            //     }
-            //     for (auto it = m_blockAddresses.unsafe_begin(); it != m_blockAddresses.unsafe_end(); it++) {
-            //         // IOBINARY(ptr, WriteBinary, sizeof(AddressType), (char*)&(*it));
-            //         if (dfs_write(cid, ckfd, (char*)&(*it), sizeof(AddressType)) != sizeof(AddressType)) {
-            //             return ErrorCode::DiskIOFail;
-            //         }
-            //     }
-            //     dfs_close(cid, ckfd);
-            //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save Finish!\n");
-            //     return ErrorCode::Success;
-            // }
-
             ErrorCode Checkpoint(std::string prefix) {
+                // TODO: Consider checkpoint to dfs
                 std::string filename = prefix + "_blockpool";
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO: saving block pool\n");
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Reload reserved blocks!\n");
@@ -240,69 +172,10 @@ namespace SPTAG::SPANN {
                 return ErrorCode::Success;
             }
 
-            // ErrorCode Recovery(std::string prefix, int batchSize) {
-            //     std::lock_guard<std::mutex> lock(m_initMutex);
-            //     m_numInitCalled++;
-            //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO Recovery: Loading block pool\n");
-            //     std::string filename = prefix + "_blockpool";
-            //     // auto ptr = f_createIO();
-            //     int rcfd = dfs_open(cid, filename.c_str(), O_RDONLY, 0644);
-            //     // if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::in)) {
-            //     //     return ErrorCode::FailedCreateFile;
-            //     // }
-            //     if (rcfd < 0) {
-            //         return ErrorCode::FailedCreateFile;
-            //     }
-            //     int blocks;
-            //     // IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&blocks);
-            //     if (dfs_read(cid, rcfd, (char*)&blocks, sizeof(SizeType)) != sizeof(SizeType)) {
-            //         return ErrorCode::DiskIOFail;
-            //     }
-            //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO Recovery: Reading %d blocks to pool\n", blocks);
-            //     AddressType currBlockAddress = 0;
-            //     for (int i = 0; i < blocks; i++) {
-            //         // IOBINARY(ptr, ReadBinary, sizeof(AddressType), (char*)&(currBlockAddress));
-            //         if (dfs_read(cid, rcfd, (char*)&currBlockAddress, sizeof(AddressType)) != sizeof(AddressType)) {
-            //             return ErrorCode::DiskIOFail;
-            //         }
-            //         m_blockAddresses.push(currBlockAddress);
-            //     }
-            //     dfs_close(cid, rcfd);
-
-            //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO Recovery: Initializing LeoFSIO\n");
-                
-            //     if (m_numInitCalled == 1) {
-            //         m_batchSize = batchSize;
-            //         pthread_create(&m_LeoFSTid, NULL, &InitializeLeoFS, this);
-            //         while(!m_LeoFSThreadReady && !m_LeoFSThreadStartFailed);
-            //         if (m_LeoFSThreadStartFailed) {
-            //             fprintf(stderr, "SPDKIO::BlockController::Initialize failed\n");
-            //             return ErrorCode::Fail;
-            //         }
-            //     }
-            //     // Create sub I/O request pool
-            //     m_currIoContext.sub_io_requests.resize(m_ssdLeoFSDepth);
-            //     m_currIoContext.in_flight = 0;
-            //     for (auto &sr : m_currIoContext.sub_io_requests) {
-            //         sr.app_buff = nullptr;
-            //         auto buf_ptr = aligned_alloc(m_ssdLeoFSAlignment, PageSize);
-            //         if (buf_ptr == nullptr) {
-            //             fprintf(stderr, "LeoFSIO::BlockController::Initialize failed: aligned_alloc failed\n");
-            //             return ErrorCode::Fail;
-            //         }
-            //         sr.myiocb.aio_buf = reinterpret_cast<uint64_t>(buf_ptr);
-            //         sr.myiocb.aio_fildes = fd;
-            //         sr.myiocb.aio_data = reinterpret_cast<uintptr_t>(&sr);
-            //         sr.myiocb.aio_nbytes = PageSize;
-            //         sr.ctrl = this;
-            //         m_currIoContext.free_sub_io_requests.push(&sr);
-            //     }
-            //     return ErrorCode::Success;
-            // }
-
             ErrorCode Recovery(std::string prefix, int batchSize) {
                 std::lock_guard<std::mutex> lock(m_initMutex);
                 m_numInitCalled++;
+                // TODO: Consider recovery from dfs
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO Recovery: Loading block pool\n");
                 std::string filename = prefix + "_blockpool";
                 auto ptr = f_createIO();
@@ -322,6 +195,7 @@ namespace SPTAG::SPANN {
                 
                 if (m_numInitCalled == 1) {
                     m_batchSize = batchSize;
+                    m_startTime = std::chrono::high_resolution_clock::now();
                     pthread_create(&m_LeoFSTid, NULL, &InitializeLeoFS, this);
                     while(!m_LeoFSThreadReady && !m_LeoFSThreadStartFailed);
                     if (m_LeoFSThreadStartFailed) {
@@ -329,23 +203,79 @@ namespace SPTAG::SPANN {
                         return ErrorCode::Fail;
                     }
                 }
+                const char* LeoFSConfigPath = getenv(kLeoFSConfigPath);
+                if (!LeoFSConfigPath) {
+                    fprintf(stderr, "LeoFSIO::BlockController::Initialize failed: LeoFSConfigPath is not set\n");
+                    return ErrorCode::Fail;
+                }
+                cid = dfs_connect_config(LeoFSConfigPath);
+                if (cid < 0) {
+                    fprintf(stderr, "LeoFSIO::BlockController::Initialize failed: dfs_connect_config failed\n");
+                    return ErrorCode::Fail;
+                }       
+
+                fd = dfs_open(cid, filePath, O_RDWR | O_DIRECT, 0666);
+                if (fd < 0) {
+                    auto err_str = dfs_errno(cid);
+                    fprintf(stderr, "open failed: %d\n", err_str);
+                    return ErrorCode::Fail;
+                }
+
+                aligned_buf = aligned_alloc(m_ssdLeoFSAlignment, PageSize);
+
+                if (m_idQueue.empty()) {
+                    id = m_maxId;
+                    m_maxId++;
+                }
+                else {
+                    id = m_idQueue.front();
+                    m_idQueue.pop();
+                }
+                while(read_complete_vec.size() <= id) {
+                    read_complete_vec.push_back(0);
+                }
+                while(read_submit_vec.size() <= id) {
+                    read_submit_vec.push_back(0);
+                }
+                while(write_complete_vec.size() <= id) {
+                    write_complete_vec.push_back(0);
+                }
+                while(write_submit_vec.size() <= id) {
+                    write_submit_vec.push_back(0);
+                }
+                while(read_bytes_vec.size() <= id) {
+                    read_bytes_vec.push_back(0);
+                }
+                while(write_bytes_vec.size() <= id) {
+                    write_bytes_vec.push_back(0);
+                }
+                while(read_blocks_time_vec.size() <= id) {
+                    read_blocks_time_vec.push_back(0);
+                }
                 // Create sub I/O request pool
-                // m_currIoContext.sub_io_requests.resize(m_ssdLeoFSDepth);
-                // m_currIoContext.in_flight = 0;
-                // for (auto &sr : m_currIoContext.sub_io_requests) {
-                //     sr.app_buff = nullptr;
-                //     auto buf_ptr = aligned_alloc(m_ssdLeoFSAlignment, PageSize);
-                //     if (buf_ptr == nullptr) {
-                //         fprintf(stderr, "FileIO::BlockController::Initialize failed: aligned_alloc failed\n");
-                //         return ErrorCode::Fail;
-                //     }
-                //     sr.myiocb.aio_buf = reinterpret_cast<uint64_t>(buf_ptr);
-                //     sr.myiocb.aio_fildes = fd;
-                //     sr.myiocb.aio_data = reinterpret_cast<uintptr_t>(&sr);
-                //     sr.myiocb.aio_nbytes = PageSize;
-                //     sr.ctrl = this;
-                //     m_currIoContext.free_sub_io_requests.push(&sr);
-                // }
+                m_currIoContext.sub_io_requests.resize(m_ssdLeoFSDepth);
+                m_currIoContext.in_flight = 0;
+                for (auto &sr : m_currIoContext.sub_io_requests) {
+                    sr.app_buff = nullptr;
+                    auto buf_ptr = aligned_alloc(m_ssdLeoFSAlignment, PageSize);
+                    if (buf_ptr == nullptr) {
+                        fprintf(stderr, "FileIO::BlockController::Initialize failed: aligned_alloc failed\n");
+                        return ErrorCode::Fail;
+                    }
+                    sr.myiocb.aio_buf = buf_ptr;
+                    sr.myiocb.aio_fildes = fd;
+                    sr.myiocb.aio_data = reinterpret_cast<uintptr_t>(&sr);
+                    sr.myiocb.aio_nbytes = PageSize;
+                    sr.ctrl = this;
+                    m_currIoContext.free_sub_io_requests.push(&sr);
+                }
+                iocp = 0;
+                auto ret = dfs_io_setup(cid, m_ssdLeoFSDepth, &iocp);
+                if (ret < 0) {
+                    fprintf(stderr, "LeoFSIO::BlockController::Initialize io_setup failed: %s\n", strerror(errno));
+                    fprintf(stderr, "m_ssdLeoFSDepth = %d, iocp = %p\n", m_ssdLeoFSDepth, &iocp);
+                    return ErrorCode::Fail;
+                }
                 return ErrorCode::Success;
             }
         };

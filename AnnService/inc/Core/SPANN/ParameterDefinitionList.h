@@ -111,7 +111,7 @@ DefineSSDParameter(m_checkpointTest, bool, false, "CheckpointTest")
 DefineSSDParameter(m_recoveryTest, bool, false, "RecoveryTest")
 DefineSSDParameter(m_saveToLeoFS, bool, false, "SaveToLeoFS")
 DefineSSDParameter(m_recoverFromLeoFS, bool, false, "RecoverFromLeoFS")
-DefineSSDParameter(m_leofsConfigPath, std::string, std::string(""), "LeoFSConfigPath")
+DefineSSDParameter(m_leoFSConfigPath, std::string, std::string(""), "LeoFSConfigPath")
 
 // GPU Building
 DefineSSDParameter(m_gpuSSDNumTrees, int, 100, "GPUSSDNumTrees")

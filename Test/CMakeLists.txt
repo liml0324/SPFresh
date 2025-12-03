@@ -1,6 +1,9 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the MIT License.
 
+set(LeoFS ${PROJECT_SOURCE_DIR}/ThirdParty/fs_demo/target/release)
+include_directories(${LeoFS})
+
 if (NOT LIBRARYONLY)
     if(NOT WIN32)
       ADD_DEFINITIONS(-DBOOST_TEST_DYN_LINK)

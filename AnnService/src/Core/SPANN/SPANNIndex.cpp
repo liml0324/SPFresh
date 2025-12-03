@@ -144,7 +144,7 @@ namespace SPTAG
                     std::vector<std::shared_ptr<Helper::DFSIO>> handles;
                     for (std::string& f : *files) {
                         auto ptr = SPTAG::f_createDFSIO();
-                        if (ptr == nullptr || !ptr->Initialize(-1, m_options.m_leoFSConfigPath.c_str(), f.c_str(), std::ios::binary | std::ios::in)) {
+                        if (ptr == nullptr || !ptr->Initialize(-1, m_options.m_leoFSConfigPath.c_str(), f.c_str(), std::ios::binary | std::ios::in, 0644)) {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open file %s!\n", f.c_str());
                             ptr = nullptr;
                         }

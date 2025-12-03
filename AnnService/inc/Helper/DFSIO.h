@@ -26,7 +26,7 @@ namespace SPTAG
             DIS_Count
         };
 
-        struct AsyncReadRequest
+        struct DFSAsyncReadRequest
         {
             std::uint64_t m_offset;
             std::uint64_t m_readSize;
@@ -41,7 +41,7 @@ namespace SPTAG
             // Carry exension metadata needed by some DFSIO implementations
             void* m_extension;
 
-            AsyncReadRequest() : m_offset(0), m_readSize(0), m_buffer(nullptr), m_status(0), m_payload(nullptr), m_success(false), m_extension(nullptr) {}
+            DFSAsyncReadRequest() : m_offset(0), m_readSize(0), m_buffer(nullptr), m_status(0), m_payload(nullptr), m_success(false), m_extension(nullptr) {}
         };
 
         class DFSIO
@@ -66,11 +66,11 @@ namespace SPTAG
 
             virtual std::uint64_t WriteString(const char* buffer, std::uint64_t offset = UINT64_MAX) = 0;
 
-            virtual bool ReadFileAsync(AsyncReadRequest& readRequest) { return false; }
+            virtual bool ReadFileAsync(DFSAsyncReadRequest& readRequest) { return false; }
             
-            virtual bool BatchReadFile(AsyncReadRequest* readRequests, std::uint32_t requestCount) { return false; }
+            virtual bool BatchReadFile(DFSAsyncReadRequest* readRequests, std::uint32_t requestCount) { return false; }
 
-            virtual bool BatchCleanRequests(SPTAG::Helper::AsyncReadRequest* readRequests, std::uint32_t requestCount) { return false; }
+            virtual bool BatchCleanRequests(SPTAG::Helper::DFSAsyncReadRequest* readRequests, std::uint32_t requestCount) { return false; }
 
             virtual std::uint64_t TellP() = 0;
 

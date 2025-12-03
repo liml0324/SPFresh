@@ -6,6 +6,9 @@ find_package(Python3 COMPONENTS Development)
 
 find_package(CUDA)
 
+set(LeoFS ${PROJECT_SOURCE_DIR}/ThirdParty/fs_demo/target/release)
+include_directories(${LeoFS})
+
 if ((NOT GPU) OR (NOT Python3_FOUND))
     set (CUDA_FOUND false)
 endif()
