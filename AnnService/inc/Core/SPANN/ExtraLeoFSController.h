@@ -527,6 +527,17 @@ namespace SPTAG::SPANN {
                 m_pShardedLRUCache = new ShardedLRUCache(shards, capacity);
             }
 
+            const char* LeoFSUseAsync = getenv(kLeoFSUseAsync);
+            if (LeoFSUseAsync) {
+                if (strcmp(LeoFSUseAsync, "True") == 0) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO: Using async\n");
+                    m_LeoFSUseAsync = true;
+                }
+                else {
+                    m_LeoFSUseAsync = false;
+                }
+            }
+
             if (recovery) {
                 m_mappingPath += "_blockmapping";
                 Load(m_mappingPath, blockSize, capacity);
@@ -777,7 +788,15 @@ namespace SPTAG::SPANN {
                 i++;
             }
             // if (m_pBlockController.ReadBlocks(blocks, values, timeout)) return ErrorCode::Success;
-            auto result = m_pBlockController.ReadBlocks(blocks, values, timeout);
+            // auto result = m_pBlockController.ReadBlocks(blocks, values, timeout);
+            bool result;
+            if (m_LeoFSUseAsync) {
+                result = m_pBlockController.ReadBlocksAsync(blocks, values, timeout);
+            }
+            else {
+                result = m_pBlockController.ReadBlocks(blocks, values, timeout);
+            }
+            
             if (m_LeoFSUseLock) {
                 for (SizeType key : keys) {
                     m_rwMutex[hash(key)].unlock_shared();
@@ -1301,6 +1320,8 @@ namespace SPTAG::SPANN {
         static constexpr int kSsdLeoFSDefaultCacheSize = 8192 << 10;
         static constexpr const char* kLeoFSCacheShards = "SPFRESH_LEOFS_IO_CACHE_SHARDS";
         static constexpr int kSsdLeoFSDefaultCacheShards = 4;
+        static constexpr const char* kLeoFSUseAsync = "SPFRESH_LEOFS_IO_USE_ASYNC";
+        static constexpr bool kLeoFSDefaultUseAsync = false;
 
         static thread_local int id;
         int m_maxId = 0;
@@ -1313,6 +1334,7 @@ namespace SPTAG::SPANN {
         bool m_LeoFSUseLock = kLeoFSDefaultUseLock;
         int m_LeoFSLockSize = kLeoFSDefaultLockSize;
         bool m_LeoFSUseCache = kLeoFSDefaultUseCache;
+        bool m_LeoFSUseAsync = kLeoFSDefaultUseAsync;
         std::string m_mappingPath;
         SizeType m_blockLimit;
         COMMON::Dataset<uintptr_t> m_pBlockMapping;
