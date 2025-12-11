@@ -125,17 +125,23 @@ namespace SPTAG::SPANN {
 
             bool ReadBlocks(AddressType* p_data, std::string* p_value, const std::chrono::microseconds &timeout = std::chrono::microseconds::max());
 
+            bool NewReadBlocks(AddressType* p_data, std::string* p_value, const std::chrono::microseconds &timeout = std::chrono::microseconds::max());
+
             bool ReadBlocks(AddressType* p_data, ByteArray& p_value, const std::chrono::microseconds &timeout = std::chrono::microseconds::max());
 
             bool ReadBlocks(const std::vector<AddressType*>& p_data, std::vector<std::string>* p_value, const std::chrono::microseconds &timeout = std::chrono::microseconds::max());
 
             bool ReadBlocks(const std::vector<AddressType*>& p_data, std::vector<ByteArray>& p_value, const std::chrono::microseconds &timeout = std::chrono::microseconds::max());
 
+            bool NewReadBlocks(const std::vector<AddressType*>& p_data, std::vector<std::string>* p_value, const std::chrono::microseconds &timeout = std::chrono::microseconds::max());
+
             bool ReadBlocksAsync(const std::vector<AddressType*>& p_data, std::vector<std::string>* p_values, const std::chrono::microseconds &timeout = std::chrono::microseconds::max());
 
             bool WriteBlocks(AddressType* p_data, int p_size, const std::string& p_value);
 
             bool WriteBlocks(AddressType* p_data, int p_size, const ByteArray& p_value);
+
+            bool NewWriteBlocks(AddressType* p_data, int p_size, const std::string& p_value);
 
             bool IOStatistics();
 
@@ -679,7 +685,7 @@ namespace SPTAG::SPANN {
             //     return ErrorCode::Success;
             // }
             auto begin_time = std::chrono::high_resolution_clock::now();
-            auto result = m_pBlockController.ReadBlocks((AddressType*)At(key), value);
+            auto result = m_pBlockController.NewReadBlocks((AddressType*)At(key), value);
             auto end_time = std::chrono::high_resolution_clock::now();
             read_time_vec[id] += std::chrono::duration_cast<std::chrono::microseconds>(end_time - begin_time).count();
             get_times_vec[id]++;
@@ -726,7 +732,7 @@ namespace SPTAG::SPANN {
             //     return ErrorCode::Success;
             // }
             auto begin_time = std::chrono::high_resolution_clock::now();
-            auto result = m_pBlockController.ReadBlocks((AddressType*)At(key), value, timeout);
+            auto result = m_pBlockController.NewReadBlocks((AddressType*)At(key), value, timeout);
             auto end_time = std::chrono::high_resolution_clock::now();
             read_time_vec[id] += std::chrono::duration_cast<std::chrono::microseconds>(end_time - begin_time).count();
             get_times_vec[id]++;
@@ -794,7 +800,7 @@ namespace SPTAG::SPANN {
                 result = m_pBlockController.ReadBlocksAsync(blocks, values, timeout);
             }
             else {
-                result = m_pBlockController.ReadBlocks(blocks, values, timeout);
+                result = m_pBlockController.NewReadBlocks(blocks, values, timeout);
             }
             
             if (m_LeoFSUseLock) {
@@ -896,7 +902,7 @@ namespace SPTAG::SPANN {
             // postingSize小于0说明是新分配的Mapping块，直接获取磁盘块，写入数据
             if (*postingSize < 0) {
                 m_pBlockController.GetBlocks(postingSize + 1, blocks);
-                m_pBlockController.WriteBlocks(postingSize + 1, blocks, value);
+                m_pBlockController.NewWriteBlocks(postingSize + 1, blocks, value);
                 *postingSize = value.size();
             }
             else {
@@ -906,7 +912,7 @@ namespace SPTAG::SPANN {
                 // 获取一组新的磁盘块，直接写入数据
                 // 为保证Checkpoint的效果，这里必须分配新的块进行写入
                 m_pBlockController.GetBlocks((AddressType*)tmpblocks + 1, blocks);
-                m_pBlockController.WriteBlocks((AddressType*)tmpblocks + 1, blocks, value);
+                m_pBlockController.NewWriteBlocks((AddressType*)tmpblocks + 1, blocks, value);
                 *((int64_t*)tmpblocks) = value.size();
 
                 // 释放原有的块
@@ -1045,7 +1051,7 @@ namespace SPTAG::SPANN {
             if (sizeInPage != 0) {
                 std::string newValue;
                 AddressType readreq[] = { sizeInPage, *(postingSize + 1 + oldblocks) };
-                m_pBlockController.ReadBlocks(readreq, &newValue);
+                m_pBlockController.NewReadBlocks(readreq, &newValue);
                 newValue += value;
 
                 uintptr_t tmpblocks;

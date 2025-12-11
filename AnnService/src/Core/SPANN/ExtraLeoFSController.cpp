@@ -327,6 +327,52 @@ bool LeoFSIO::BlockController::ReadBlocks(AddressType* p_data, std::string* p_va
     return true;
 }
 
+bool LeoFSIO::BlockController::NewReadBlocks(AddressType* p_data, std::string* p_value, const std::chrono::microseconds &timeout) {
+    p_value->resize(p_data[0]);
+    AddressType currOffset = 0;
+    AddressType dataIdx = 1;
+    auto blockNum = (p_data[0] + PageSize - 1) >> PageSizeEx;
+    if (blockNum == 0) {
+        // std::cout << p_data[0] << std::endl;
+        return true;
+    }
+    read_submit_vec[id] += blockNum;
+    if (blockNum > m_ssdLeoFSDepth) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "LeoFSIO::BlockController::ReadBlocks: blockNum > m_ssdLeoFSDepth\n");
+        return false;
+    }
+
+    std::vector<dfs_iocb*> iocbs(blockNum);
+
+    for (int i = 0; i < blockNum; i++) {
+        void *buf = (void*)p_value->data() + currOffset;
+        uint64_t real_size = (p_data[0] - currOffset) < PageSize ? (p_data[0] - currOffset) : PageSize;
+        uint64_t offset = p_data[dataIdx] * PageSize;
+        // std::cout << "Address: " << p_data[dataIdx] << " Offset: " << offset << " RealSize: " << real_size << std::endl;
+        auto currSubIo = m_currIoContext.free_sub_io_requests.front();
+        m_currIoContext.free_sub_io_requests.pop();
+        iocbs[i] = &(currSubIo->myiocb);
+        iocbs[i]->aio_nbytes = real_size;
+        iocbs[i]->aio_offset = offset;
+        currSubIo->app_buff = buf;
+        dataIdx++;
+        currOffset += PageSize;
+        read_complete_vec[id]++;
+    }
+
+    auto ret = dfs_multi_pread(cid, fd, blockNum, iocbs.data());
+    for (int i = 0; i < blockNum; i++) {
+        auto currSubIo = reinterpret_cast<SubIoRequest*>(iocbs[i]->aio_data);
+        m_currIoContext.free_sub_io_requests.push(currSubIo);
+        if (ret < 0) {
+            continue;
+        }
+        memcpy(currSubIo->app_buff, iocbs[i]->aio_buf, iocbs[i]->aio_nbytes);
+        read_complete_vec[id]++;
+    }
+    return true;
+}
+
 bool LeoFSIO::BlockController::ReadBlocks(const std::vector<AddressType*>& p_data, std::vector<std::string>* p_values, const std::chrono::microseconds &timeout) {
 #ifdef USE_FILE_DEBUG
     auto debug_string = std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now() - m_startTime).count()) + " 4";
@@ -386,15 +432,100 @@ bool LeoFSIO::BlockController::ReadBlocks(const std::vector<AddressType*>& p_dat
     return true;
 }
 
-bool LeoFSIO::BlockController::ReadBlocksAsync(const std::vector<AddressType*>& p_data, std::vector<std::string>* p_values, const std::chrono::microseconds &timeout) {
-#ifdef USE_FILE_DEBUG
-    auto debug_string = std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now() - m_startTime).count()) + " 4";
-    auto result = pwrite(debug_fd, debug_string.c_str(), debug_string.size(), 0);
-    if (result == -1) {
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "FileIO::BlockController::ReadBlocks: pwrite failed\n");
+bool LeoFSIO::BlockController::NewReadBlocks(const std::vector<AddressType*>& p_data, std::vector<std::string>* p_values, const std::chrono::microseconds &timeout) {
+    auto t1 = std::chrono::high_resolution_clock::now();
+    m_batchReadTimes++;
+    p_values->resize(p_data.size());
+    const int batch_size = m_batchSize;
+    std::vector<dfs_iocb*> iocbs(batch_size);
+    // std::vector<dfs_io_event> events(batch_size);
+    std::vector<SubIoRequest> subIoRequests;
+    std::vector<int> subIoRequestCount(p_data.size(), 0);
+    subIoRequests.reserve(256);
+    for(size_t i = 0; i < p_data.size(); i++) {
+        AddressType* p_data_i = p_data[i];
+        std::string* p_value = &((*p_values)[i]);
+
+        if (p_data_i == nullptr) {
+            continue;
+        }
+
+        p_value->resize(p_data_i[0]);
+        AddressType currOffset = 0;
+        AddressType dataIdx = 1;
+
+        while(currOffset < p_data_i[0]) {
+            SubIoRequest currSubIo;
+            currSubIo.app_buff = (void*)p_value->data() + currOffset;
+            currSubIo.real_size = (p_data_i[0] - currOffset) < PageSize ? (p_data_i[0] - currOffset) : PageSize;
+            currSubIo.offset = p_data_i[dataIdx] * PageSize;
+            currSubIo.posting_id = i;
+            subIoRequests.push_back(currSubIo);
+            subIoRequestCount[i]++;
+            read_submit_vec[id]++;
+            currOffset += PageSize;
+            dataIdx++;
+        }
     }
-    fsync(debug_fd);
-#endif
+
+    
+    for (int currSubIoStartId = 0; currSubIoStartId < subIoRequests.size(); currSubIoStartId += batch_size) {
+        int currSubIoEndId = (currSubIoStartId + batch_size) > subIoRequests.size() ? subIoRequests.size() : currSubIoStartId + batch_size;
+        int currSubIoIdx = currSubIoStartId;
+        int totalToSubmit = currSubIoEndId - currSubIoStartId;
+        int totalSubmitted = 0, totalDone = 0;
+        for (int i = 0; i < totalToSubmit; i++) {
+            auto currSubIoIdx = currSubIoStartId + i;
+            auto currSubIo = m_currIoContext.free_sub_io_requests.front();
+            m_currIoContext.free_sub_io_requests.pop();
+            currSubIo->app_buff = subIoRequests[currSubIoIdx].app_buff;
+            currSubIo->real_size = subIoRequests[currSubIoIdx].real_size;
+            currSubIo->posting_id = subIoRequests[currSubIoIdx].posting_id;
+            currSubIo->myiocb.aio_lio_opcode = 0; // IO_CMD_PREAD
+            currSubIo->myiocb.aio_offset = subIoRequests[currSubIoIdx].offset;
+            currSubIo->myiocb.aio_nbytes = subIoRequests[currSubIoIdx].real_size;
+            iocbs[i] = &(currSubIo->myiocb);
+            currSubIoIdx++;
+        }
+        int ret = dfs_multi_pread(cid, fd, totalToSubmit, iocbs.data());
+
+        if (ret >= 0) {
+            for (int i = 0; i < totalToSubmit; i++) {
+                auto currSubIo = reinterpret_cast<SubIoRequest*>(iocbs[i]->aio_data);
+                subIoRequestCount[currSubIo->posting_id]--;
+                m_currIoContext.free_sub_io_requests.push(currSubIo);
+                memcpy(currSubIo->app_buff, currSubIo->myiocb.aio_buf, currSubIo->real_size);
+                read_complete_vec[id]++;
+            }
+        }
+        else {
+            for (int i = 0; i < totalToSubmit; i++) {
+                auto currSubIo = reinterpret_cast<SubIoRequest*>(iocbs[i]->aio_data);
+                m_currIoContext.free_sub_io_requests.push(currSubIo);
+            }
+        }
+        
+        auto t2 = std::chrono::high_resolution_clock::now();
+        if(std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1) > timeout) {
+            break;
+        }
+    }
+
+    bool is_timeout = false;
+    for (int i = 0; i < subIoRequestCount.size(); i++) {
+        if (subIoRequestCount[i] != 0) {
+            // SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "FileIO::BlockController::ReadBlocks (batch) : timeout\n");
+            (*p_values)[i].clear();
+            is_timeout = true;
+        }
+    }
+    if (is_timeout) {
+        m_batchReadTimeouts++;
+    }
+    return true;
+}
+
+bool LeoFSIO::BlockController::ReadBlocksAsync(const std::vector<AddressType*>& p_data, std::vector<std::string>* p_values, const std::chrono::microseconds &timeout) {
     auto t1 = std::chrono::high_resolution_clock::now();
     m_batchReadTimes++;
     p_values->resize(p_data.size());
@@ -536,6 +667,52 @@ bool LeoFSIO::BlockController::WriteBlocks(AddressType* p_data, int p_size, cons
         currBlockIdx++;
         write_complete_vec[id]++;
     }
+    
+    return true;
+}
+
+bool LeoFSIO::BlockController::NewWriteBlocks(AddressType* p_data, int p_size, const std::string& p_value) {
+    AddressType currBlockIdx = 0;
+    if (p_size == 0) {
+        return true;
+    }
+    int totalSize = p_value.size();
+    std::vector<dfs_iocb*> iocbs(p_size);
+
+    // Submit all I/Os
+    write_submit_vec[id] += p_size;
+    for (int i = 0; i  < p_size; i++) {
+        auto currSubIo = m_currIoContext.free_sub_io_requests.front();
+        m_currIoContext.free_sub_io_requests.pop();
+        iocbs[i] = &(currSubIo->myiocb);
+        void *buf = (void*)p_value.data() + currBlockIdx * PageSize;
+        uint64_t real_size = (PageSize * (currBlockIdx + 1)) > totalSize ? (totalSize - currBlockIdx * PageSize) : PageSize;
+        uint64_t offset = p_data[currBlockIdx] * PageSize;
+        if (offset < 0) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "LeoFSIO::BlockController::WriteBlocks: offset is negative\n");
+            exit(1);
+        }
+        // memset(aligned_buf, 0, PageSize);
+        memcpy(iocbs[i]->aio_buf, buf, real_size);
+        iocbs[i]->aio_offset = offset;
+        iocbs[i]->aio_nbytes = real_size;
+        currBlockIdx++;
+        // write_complete_vec[id]++;
+    }
+
+    auto ret = dfs_multi_pwrite(cid, fd, p_size, iocbs.data());
+
+    for (int i = 0; i < p_size; i++) {
+        auto req = reinterpret_cast<SubIoRequest*>(iocbs[i]->aio_data);
+        m_currIoContext.free_sub_io_requests.push(req);
+    }
+
+    if (ret < p_size) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "LeoFSIO::BlockController::WriteBlocks: dfs_pwrite failed\n");
+        return false;
+    }
+    
+    write_complete_vec[id] += p_size;
     
     return true;
 }

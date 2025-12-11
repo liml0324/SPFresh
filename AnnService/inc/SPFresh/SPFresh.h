@@ -1042,6 +1042,11 @@ namespace SPTAG {
                     }
                     p_index->OpenMerge();
                 }
+
+
+                if (days == -1) {
+                    p_index->Checkpoint();
+                }
             }
 
             template <typename ValueType>

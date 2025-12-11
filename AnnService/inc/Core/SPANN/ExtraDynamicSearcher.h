@@ -150,9 +150,6 @@ namespace SPTAG::SPANN {
 
         COMMON::PostingSizeRecord m_postingSizes;
 
-        std::shared_ptr<SPDKThreadPool> m_splitThreadPool;
-        std::shared_ptr<SPDKThreadPool> m_reassignThreadPool;
-
         IndexStats m_stat;
 
         std::shared_ptr<PersistentBuffer> m_wal;
@@ -163,6 +160,9 @@ namespace SPTAG::SPANN {
         std::unordered_set<SizeType>m_splitList;
 
         tbb::concurrent_hash_map<SizeType, SizeType> m_mergeList;
+
+        std::shared_ptr<SPDKThreadPool> m_splitThreadPool;
+        std::shared_ptr<SPDKThreadPool> m_reassignThreadPool;
 
     public:
         ExtraDynamicSearcher(const char* dbPath, int dim, int postingBlockLimit, bool useDirectIO, float searchLatencyHardLimit, int mergeThreshold, bool useSPDK = false, int batchSize = 64, int bufferLength = 3, bool recovery = false, bool useFileIO = false, bool useLeoFS = false) {

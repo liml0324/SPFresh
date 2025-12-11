@@ -17,9 +17,11 @@ int main(int argc, char* argv[]) {
     int thread_num = 4;
     int timeout_times = 0;
     double read_rate = 0.5;
+    int64_t multi_get_time;
     std::mutex error_mtx;
     std::vector<std::string> dataset(dataset_size);
     std::vector<int> values(kv_num);
+    std::vector<int64_t> time_vec(thread_num);
     std::chrono::high_resolution_clock::time_point start, end;
     std::chrono::microseconds timeout;
     
@@ -35,13 +37,13 @@ int main(int argc, char* argv[]) {
     }
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Data generated\n");
     // SPANN::FileIO fileIO("/nvme0n1/lml/pbfile", 1024 * 1024, std::numeric_limits<SizeType>::max(), max_blocks * 2, 1024, 64, false);
-    SPANN::LeoFSIO leoFSIO("/spfresh/testfile", 1024 * 1024, std::numeric_limits<SizeType>::max(), max_blocks * 2, 1024, 64, false);
+    SPANN::LeoFSIO leoFSIO("/testfile", 1024 * 1024, std::numeric_limits<SizeType>::max(), max_blocks * 2, 1024, 64, false);
     leoFSIO.Initialize(true);
 
     bool single_thread_test     = false;
-    bool multi_thread_test      = true;
+    bool multi_thread_test      = false;
     bool multi_get_test         = true;
-    bool mixed_read_write_test  = true;
+    bool mixed_read_write_test  = false;
     bool timeout_test           = false;
     bool conflict_test          = false;
 
@@ -193,10 +195,14 @@ MultiGetTest:
     if (!multi_get_test) {
         goto MixReadWriteTest;
     }
-    iter_num = 100;
-    kv_num = 10000;
+    iter_num = 10;
+    kv_num = 1000;
     thread_num = 4;
     values.resize(kv_num);
+    time_vec.resize(thread_num);
+    for (int i = 0; i < thread_num; i++) {
+        time_vec[i] = 0;
+    }
     start = std::chrono::high_resolution_clock::now();
     for (int iter = 0; iter < iter_num; iter++) {
         std::vector<std::thread> threads;
@@ -211,7 +217,7 @@ MultiGetTest:
             thread_keys[thread_id].push_back(i);
         }
         for (int i = 0; i < thread_num; i++) {
-            threads.emplace_back([&leoFSIO, &values, &thread_keys, &errors, &error_mtx, &dataset, i]() {
+            threads.emplace_back([&leoFSIO, &values, &thread_keys, &errors, &error_mtx, &dataset, i, &time_vec]() {
                 leoFSIO.Initialize();
                 for (auto key : thread_keys[i]) {
                     leoFSIO.Put(key, dataset[values[key]]);
@@ -225,7 +231,10 @@ MultiGetTest:
                     for (int j = k; j < std::min(k + 256, num); j++) {
                         keys.push_back(thread_keys[i][j]);
                     }
+                    auto start = std::chrono::high_resolution_clock::now();
                     leoFSIO.MultiGet(keys, &readValues);
+                    auto end = std::chrono::high_resolution_clock::now();
+                    time_vec[i] += std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
                     for (int j = 0; j < keys.size(); j++) {
                         if (dataset[values[keys[j]]] != readValues[j]) {
                             errors[i] = true;
@@ -258,11 +267,16 @@ MultiGetTest:
                 return 0;
             }
         }
+        std::cout << "MultiGet test iter " << iter << " end" << std::endl;
     }
     end = std::chrono::high_resolution_clock::now();
+    multi_get_time = 0;
+    for (int i = 0; i < thread_num; i++) {
+        multi_get_time += time_vec[i];
+    }
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "MultiGet test passed\n");
-    // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "MultiGet time: %d ms\n", std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
-    // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "MultiGet IOPS: %fk\n", (double)iter_num * kv_num * 2 / std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "MultiGet time: %lf ms\n", (double)multi_get_time / 1000);
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "MultiGet IOPS: %fk\n", (double)iter_num * kv_num * 2 / multi_get_time * 1000);
     leoFSIO.GetStat();
 
     // 多线程混合读写存取

@@ -46,7 +46,7 @@ namespace SPTAG
             std::shared_ptr<std::uint64_t> m_vectorTranslateMap;
             std::unordered_map<std::string, std::string> m_headParameters;
 
-            std::shared_ptr<IExtraSearcher> m_extraSearcher;
+            
             std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<ExtraWorkSpace>> m_workSpaceFactory;
 
             Options m_options;
@@ -59,6 +59,8 @@ namespace SPTAG
             std::shared_timed_mutex m_checkPointLock;
 
             COMMON::VersionLabel m_versionMap;
+
+            std::shared_ptr<IExtraSearcher> m_extraSearcher;
 
         public:
             static thread_local std::shared_ptr<ExtraWorkSpace> m_workspace;
