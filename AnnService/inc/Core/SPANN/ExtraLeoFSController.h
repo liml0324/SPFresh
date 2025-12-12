@@ -6,6 +6,7 @@
 #include "inc/Core/Common/Dataset.h"
 #include "inc/Core/VectorIndex.h"
 #include "inc/Helper/ThreadPool.h"
+#include "Options.h"
 #include "leofs.h"
 #include <cstdlib>
 #include <memory>
@@ -71,6 +72,8 @@ namespace SPTAG::SPANN {
             static thread_local int debug_fd;
             static thread_local uint64_t iocp;
             static std::chrono::high_resolution_clock::time_point m_startTime;
+
+            Options *m_pOpt;
 
             static thread_local int id;
             int m_maxId = 0;
@@ -151,6 +154,10 @@ namespace SPTAG::SPANN {
                 return m_blockAddresses.unsafe_size();
             };
 
+            void SetOpt(Options *opt) {
+                m_pOpt = opt;
+            }
+
             int GetCid() {
                 return cid;
             }
@@ -178,23 +185,64 @@ namespace SPTAG::SPANN {
                 return ErrorCode::Success;
             }
 
+            ErrorCode CheckpointDFS(std::string prefix) {
+                std::string filename = prefix + "_blockpool";
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO: saving block pool to DFS\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Reload reserved blocks!\n");
+                AddressType currBlockAddress = 0;
+                for (int count = 0; count < m_blockAddresses_reserve.unsafe_size(); count++) {
+                    m_blockAddresses_reserve.try_pop(currBlockAddress);
+                    m_blockAddresses.push(currBlockAddress);
+                }
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Reload Finish!\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save blockpool To %s\n", filename.c_str());
+                auto ptr = f_createDFSIO();
+                if (ptr == nullptr || !ptr->Initialize(-1, m_pOpt->m_leoFSConfigPath.c_str(), filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644)) return ErrorCode::FailedCreateFile;
+                int blocks = RemainBlocks();
+                IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&blocks);
+                for (auto it = m_blockAddresses.unsafe_begin(); it != m_blockAddresses.unsafe_end(); it++) {
+                    IOBINARY(ptr, WriteBinary, sizeof(AddressType), (char*)&(*it));
+                }
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save Finish!\n");
+                return ErrorCode::Success;
+            }
+
             ErrorCode Recovery(std::string prefix, int batchSize) {
                 std::lock_guard<std::mutex> lock(m_initMutex);
                 m_numInitCalled++;
                 // TODO: Consider recovery from dfs
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO Recovery: Loading block pool\n");
-                std::string filename = prefix + "_blockpool";
-                auto ptr = f_createIO();
-                if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::in)) {
-                    return ErrorCode::FailedCreateFile;
-                }
+                
                 int blocks;
-                IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&blocks);
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO Recovery: Reading %d blocks to pool\n", blocks);
+                
                 AddressType currBlockAddress = 0;
-                for (int i = 0; i < blocks; i++) {
-                    IOBINARY(ptr, ReadBinary, sizeof(AddressType), (char*)&(currBlockAddress));
-                    m_blockAddresses.push(currBlockAddress);
+
+                if (m_pOpt->m_recoverFromLeoFS) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO Recovery: Loading block pool from DFS\n");
+                    std::string filename = prefix + "_blockpool";
+                    auto ptr = f_createDFSIO();
+                    if (ptr == nullptr || !ptr->Initialize(-1, m_pOpt->m_leoFSConfigPath.c_str(), filename.c_str(), O_RDONLY, 0644)) {
+                        return ErrorCode::FailedCreateFile;
+                    }
+                    IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&blocks);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO Recovery: Reading %d blocks to pool from DFS\n", blocks);
+                    for (int i = 0; i < blocks; i++) {
+                        IOBINARY(ptr, ReadBinary, sizeof(AddressType), (char*)&(currBlockAddress));
+                        m_blockAddresses.push(currBlockAddress);
+                    }
+                }
+                else {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO Recovery: Loading block pool\n");
+                    std::string filename = prefix + "_blockpool";
+                    auto ptr = f_createIO();
+                    if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::in)) {
+                        return ErrorCode::FailedCreateFile;
+                    }
+                    IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&blocks);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO Recovery: Reading %d blocks to pool\n", blocks);
+                    for (int i = 0; i < blocks; i++) {
+                        IOBINARY(ptr, ReadBinary, sizeof(AddressType), (char*)&(currBlockAddress));
+                        m_blockAddresses.push(currBlockAddress);
+                    }
                 }
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO Recovery: Initializing FileIO\n");
@@ -485,12 +533,17 @@ namespace SPTAG::SPANN {
         };
 
     public:
-        LeoFSIO(const char* filePath, SizeType blockSize, SizeType capacity, SizeType postingBlocks, SizeType bufferSize = 1024, int batchSize = 64, bool recovery = false, int compactionThreads = 1) {
+        LeoFSIO(const char* filePath, SizeType blockSize, SizeType capacity, SizeType postingBlocks, SizeType bufferSize = 1024, int batchSize = 64, bool recovery = false, int compactionThreads = 1, Options *opt = nullptr) {
             // TODO: 后面还得再看看，可能需要修改
             m_mappingPath = std::string(filePath);
             m_blockLimit = postingBlocks + 1;
             m_bufferLimit = bufferSize;
+            m_pOpt = opt;
+            m_pBlockController.SetOpt(opt);
 
+            if (!m_pOpt) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "LeoFSIO: No options provided!\n");
+            }
             const char* LeoFSUseLock = getenv(kLeoFSUseLock);
             if(LeoFSUseLock) {
                 if(strcmp(LeoFSUseLock, "True") == 0) {
@@ -575,6 +628,11 @@ namespace SPTAG::SPANN {
 
         ~LeoFSIO() {
             ShutDown();
+        }
+
+        void SetOpt(Options *opt) {
+            m_pBlockController.SetOpt(opt);
+            m_pOpt = opt;
         }
 
         void ShutDown() override {
@@ -1222,49 +1280,52 @@ namespace SPTAG::SPANN {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load mapping (%d,%d) Finish!\n", CR, mycols);
             return ErrorCode::Success;
         }
-        
-        // ErrorCode Save(std::string path) {
-        //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save mapping To %s\n", path.c_str());
-        //     // auto ptr = f_createIO();
-        //     // if (ptr == nullptr || !ptr->Initialize(path.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
-        //     int cid = m_pBlockController.GetCid();
-        //     int svfd = dfs_open(cid, path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        //     SizeType CR = m_pBlockMapping.R();
-        //     // IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&CR);
-        //     if (dfs_write(cid, svfd, (char*)&CR, sizeof(SizeType)) != sizeof(SizeType)) {
-        //         return ErrorCode::DiskIOFail;
-        //     }
-        //     // IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&m_blockLimit);
-        //     if (dfs_write(cid, svfd, (char*)&m_blockLimit, sizeof(SizeType)) != sizeof(SizeType)) {
-        //         return ErrorCode::DiskIOFail;
-        //     }
-        //     std::vector<AddressType> empty(m_blockLimit, 0xffffffffffffffff);
-        //     for (int i = 0; i < CR; i++) {
-        //         if (At(i) == 0xffffffffffffffff) {
-        //             // IOBINARY(ptr, WriteBinary, sizeof(AddressType) * m_blockLimit, (char*)(empty.data()));
-        //             if (dfs_write(cid, svfd, (char*)(empty.data()), sizeof(AddressType) * m_blockLimit) != sizeof(AddressType) * m_blockLimit) {
-        //                 return ErrorCode::DiskIOFail;
-        //             }
-        //         }
-        //         else {
-        //             int64_t* postingSize = (int64_t*)At(i);
-        //             // IOBINARY(ptr, WriteBinary, sizeof(AddressType) * m_blockLimit, (char*)postingSize);
-        //             if (dfs_write(cid, svfd, (char*)postingSize, sizeof(AddressType) * m_blockLimit) != sizeof(AddressType) * m_blockLimit) {
-        //                 return ErrorCode::DiskIOFail;
-        //             }
-        //         }
-        //     }
-        //     dfs_close(cid, svfd);
-        //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save mapping (%d,%d) Finish!\n", CR, m_blockLimit);
-        //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin printing hot/cold stat\n");
-        //     // if (PrintHotColdStat() == ErrorCode::Success)
-        //     //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "End printing hot/cold stat\n");
-        //     return ErrorCode::Success;
-        // }
+
+        ErrorCode LoadDFS(std::string path, SizeType blockSize, SizeType capacity) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load mapping From %s\n", path.c_str());
+            auto ptr = f_createDFSIO();
+            if (ptr == nullptr || !ptr->Initialize(-1, m_pOpt->m_leoFSConfigPath.c_str(), path.c_str(), O_RDONLY, 0644)) return ErrorCode::FailedOpenFile;
+
+            SizeType CR, mycols;
+            IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&CR);
+            IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&mycols);
+            if (mycols > m_blockLimit) m_blockLimit = mycols;
+
+            m_pBlockMapping.Initialize(CR, 1, blockSize, capacity);
+            for (int i = 0; i < CR; i++) {
+                At(i) = (uintptr_t)(new AddressType[m_blockLimit]);
+                IOBINARY(ptr, ReadBinary, sizeof(AddressType) * mycols, (char*)At(i));
+            }
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load mapping (%d,%d) Finish!\n", CR, mycols);
+            return ErrorCode::Success;
+        }
+
         ErrorCode Save(std::string path) {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save mapping To %s\n", path.c_str());
             auto ptr = f_createIO();
             if (ptr == nullptr || !ptr->Initialize(path.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
+
+            SizeType CR = m_pBlockMapping.R();
+            IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&CR);
+            IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&m_blockLimit);
+            std::vector<AddressType> empty(m_blockLimit, 0xffffffffffffffff);
+            for (int i = 0; i < CR; i++) {
+                if (At(i) == 0xffffffffffffffff) {
+                    IOBINARY(ptr, WriteBinary, sizeof(AddressType) * m_blockLimit, (char*)(empty.data()));
+                }
+                else {
+                    int64_t* postingSize = (int64_t*)At(i);
+                    IOBINARY(ptr, WriteBinary, sizeof(AddressType) * m_blockLimit, (char*)postingSize);
+                }
+            }
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save mapping (%d,%d) Finish!\n", CR, m_blockLimit);
+            return ErrorCode::Success;
+        }
+
+        ErrorCode SaveDFS(std::string path) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save mapping To %s\n", path.c_str());
+            auto ptr = f_createDFSIO();
+            if (ptr == nullptr || !ptr->Initialize(-1, m_pOpt->m_leoFSConfigPath.c_str(), path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644)) return ErrorCode::FailedCreateFile;
 
             SizeType CR = m_pBlockMapping.R();
             IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&CR);
@@ -1310,9 +1371,31 @@ namespace SPTAG::SPANN {
 
         ErrorCode Checkpoint(std::string prefix) override {
             std::string filename = prefix + "_blockmapping";
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO: saving block mapping\n");
-            Save(filename);
-            return m_pBlockController.Checkpoint(prefix);
+            if (m_pOpt->m_saveToLeoFS) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO: saving block mapping to DFS\n");
+                auto ret = SaveDFS(filename);
+                if (ret != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "LeoFSIO: saving block mapping to DFS failed\n");
+                    return ret;
+                }
+                ret = m_pBlockController.CheckpointDFS(prefix);
+                if (ret != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "LeoFSIO: saving block controller to DFS failed\n");
+                }
+                return ret;
+            } 
+            else {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO: saving block mapping\n");
+                auto ret = Save(filename);
+                if (ret != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "LeoFSIO: saving block mapping failed\n");
+                }
+                ret = m_pBlockController.Checkpoint(prefix);
+                if (ret != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "LeoFSIO: saving block controller failed\n");
+                }
+                return ret;
+            }
         }
 
     private:
@@ -1360,6 +1443,8 @@ namespace SPTAG::SPANN {
         bool m_shutdownCalled;
         std::shared_mutex m_updateMutex;
         std::vector<std::shared_mutex> m_rwMutex;
+
+        Options *m_pOpt;
 
         inline int hash(int key) {
             return key % m_LeoFSLockSize;

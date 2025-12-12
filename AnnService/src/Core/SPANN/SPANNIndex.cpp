@@ -198,7 +198,7 @@ namespace SPTAG
                 } else if(m_options.m_useFileIO) {
                     m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, false, m_options.m_spdkBatchSize, m_options.m_bufferLength, m_options.m_recovery, true));
                 } else if(m_options.m_useLeoFS) {
-                    m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, false, m_options.m_spdkBatchSize, m_options.m_bufferLength, m_options.m_recovery, false, true));
+                    m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, false, m_options.m_spdkBatchSize, m_options.m_bufferLength, m_options.m_recovery, false, true, &m_options));
                 } else {
                     m_extraSearcher.reset(new ExtraStaticSearcher<T>());
                 }
@@ -892,7 +892,7 @@ namespace SPTAG
                 } else if (m_options.m_useFileIO) {
                     m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, false, m_options.m_spdkBatchSize, false, true));
                 } else if (m_options.m_useLeoFS) {
-                    m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, false, m_options.m_spdkBatchSize, false, false, true));
+                    m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, false, m_options.m_spdkBatchSize, false, false, true, &m_options));
                 } else {
                     if (m_pQuantizer) {
                         m_extraSearcher.reset(new ExtraStaticSearcher<std::uint8_t>());
