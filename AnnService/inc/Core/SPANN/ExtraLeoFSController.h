@@ -165,7 +165,7 @@ namespace SPTAG::SPANN {
             ErrorCode Checkpoint(std::string prefix) {
                 // TODO: Consider checkpoint to dfs
                 std::string filename = prefix + "_blockpool";
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO: saving block pool\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO: saving block pool\n");
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Reload reserved blocks!\n");
                 AddressType currBlockAddress = 0;
                 for (int count = 0; count < m_blockAddresses_reserve.unsafe_size(); count++) {
@@ -187,7 +187,7 @@ namespace SPTAG::SPANN {
 
             ErrorCode CheckpointDFS(std::string prefix) {
                 std::string filename = prefix + "_blockpool";
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO: saving block pool to DFS\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO: saving block pool to DFS\n");
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Reload reserved blocks!\n");
                 AddressType currBlockAddress = 0;
                 for (int count = 0; count < m_blockAddresses_reserve.unsafe_size(); count++) {
@@ -217,35 +217,35 @@ namespace SPTAG::SPANN {
                 AddressType currBlockAddress = 0;
 
                 if (m_pOpt->m_recoverFromLeoFS) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO Recovery: Loading block pool from DFS\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO Recovery: Loading block pool from DFS\n");
                     std::string filename = prefix + "_blockpool";
                     auto ptr = f_createDFSIO();
                     if (ptr == nullptr || !ptr->Initialize(-1, m_pOpt->m_leoFSConfigPath.c_str(), filename.c_str(), O_RDONLY, 0644)) {
                         return ErrorCode::FailedCreateFile;
                     }
                     IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&blocks);
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO Recovery: Reading %d blocks to pool from DFS\n", blocks);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO Recovery: Reading %d blocks to pool from DFS\n", blocks);
                     for (int i = 0; i < blocks; i++) {
                         IOBINARY(ptr, ReadBinary, sizeof(AddressType), (char*)&(currBlockAddress));
                         m_blockAddresses.push(currBlockAddress);
                     }
                 }
                 else {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO Recovery: Loading block pool\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO Recovery: Loading block pool\n");
                     std::string filename = prefix + "_blockpool";
                     auto ptr = f_createIO();
                     if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::in)) {
                         return ErrorCode::FailedCreateFile;
                     }
                     IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&blocks);
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO Recovery: Reading %d blocks to pool\n", blocks);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO Recovery: Reading %d blocks to pool\n", blocks);
                     for (int i = 0; i < blocks; i++) {
                         IOBINARY(ptr, ReadBinary, sizeof(AddressType), (char*)&(currBlockAddress));
                         m_blockAddresses.push(currBlockAddress);
                     }
                 }
 
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO Recovery: Initializing FileIO\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO Recovery: Initializing LeoFSIO\n");
                 
                 if (m_numInitCalled == 1) {
                     m_batchSize = batchSize;
@@ -313,7 +313,7 @@ namespace SPTAG::SPANN {
                     sr.app_buff = nullptr;
                     auto buf_ptr = aligned_alloc(m_ssdLeoFSAlignment, PageSize);
                     if (buf_ptr == nullptr) {
-                        fprintf(stderr, "FileIO::BlockController::Initialize failed: aligned_alloc failed\n");
+                        fprintf(stderr, "LeoFSIO::BlockController::Initialize failed: aligned_alloc failed\n");
                         return ErrorCode::Fail;
                     }
                     sr.myiocb.aio_buf = buf_ptr;
