@@ -163,6 +163,22 @@ namespace SPTAG
             if ((ret = m_deletedID.Save(p_indexStreams[3])) != ErrorCode::Success) return ret;
             return ret;
         }
+
+        template<typename T>
+        ErrorCode Index<T>::SaveIndexData(const std::vector<std::shared_ptr<Helper::DFSIO>>& p_indexStreams)
+        {
+            if (p_indexStreams.size() < 4) return ErrorCode::LackOfInputs;
+            
+            std::lock_guard<std::mutex> lock(m_dataAddLock);
+            std::unique_lock<std::shared_timed_mutex> uniquelock(m_dataDeleteLock);
+
+            ErrorCode ret = ErrorCode::Success;
+            if ((ret = m_pSamples.Save(p_indexStreams[0])) != ErrorCode::Success) return ret;
+            if ((ret = m_pTrees.SaveTrees(p_indexStreams[1])) != ErrorCode::Success) return ret;
+            if ((ret = m_pGraph.SaveGraph(p_indexStreams[2])) != ErrorCode::Success) return ret;
+            if ((ret = m_deletedID.Save(p_indexStreams[3])) != ErrorCode::Success) return ret;
+            return ret;
+        }
         
 #pragma region K-NN search
 /*

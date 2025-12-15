@@ -227,6 +227,30 @@ FileMetadataSet::SaveMetadata(std::shared_ptr<Helper::DiskIO> p_metaOut, std::sh
     return ErrorCode::Success;
 }
 
+ErrorCode
+FileMetadataSet::SaveMetadata(std::shared_ptr<Helper::DFSIO> p_metaOut, std::shared_ptr<Helper::DFSIO> p_metaIndexOut)
+{
+    std::shared_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
+    SizeType count = Count();
+    IOBINARY(p_metaIndexOut, WriteBinary, sizeof(SizeType), (const char*)&count);
+    IOBINARY(p_metaIndexOut, WriteBinary, sizeof(std::uint64_t) * m_offsets.size(), (const char*)m_offsets.data());
+
+    std::uint64_t bufsize = 1000000;
+    char* buf = new char[bufsize];
+    auto readsize = m_fp->ReadBinary(bufsize, buf, 0);
+    while (readsize > 0) {
+        IOBINARY(p_metaOut, WriteBinary, readsize, buf);
+        readsize = m_fp->ReadBinary(bufsize, buf);
+    }
+    delete[] buf;
+    
+    if (m_newdata.size() > 0) {
+        IOBINARY(p_metaOut, WriteBinary, m_newdata.size(), (const char*)m_newdata.data());
+    }
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save MetaIndex(%llu) Meta(%llu) to LeoFS\n", m_offsets.size() - 1, m_offsets.back());
+    return ErrorCode::Success;
+}
+
 
 ErrorCode
 FileMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile)
@@ -247,6 +271,37 @@ FileMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& 
         std::rename((p_metaFile + "_tmp").c_str(), p_metaFile.c_str());
         std::rename((p_metaindexFile + "_tmp").c_str(), p_metaindexFile.c_str());
         if (!m_fp->Initialize(p_metaFile.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
+        m_count = static_cast<SizeType>(m_offsets.size() - 1);
+        m_newdata.clear();
+    }
+    return ErrorCode::Success;
+}
+
+ErrorCode
+FileMetadataSet::SaveMetadataDFS(int cid, const std::string& p_metaFile, const std::string& p_metaindexFile, const std::string& p_leoFSConfigPath)
+{
+    {
+        std::shared_ptr<Helper::DFSIO> metaOut = f_createDFSIO(), metaIndexOut = f_createDFSIO();
+        if (metaOut == nullptr || metaIndexOut == nullptr || !metaOut->Initialize(cid, nullptr, (p_metaFile + "_tmp").c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644) || !metaIndexOut->Initialize(cid, nullptr, (p_metaindexFile + "_tmp").c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644))
+            return ErrorCode::FailedCreateFile;
+
+        ErrorCode ret = SaveMetadata(metaOut, metaIndexOut);
+        if (ret != ErrorCode::Success) return ret;
+    }
+    {
+        std::unique_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
+        m_dfsfp->ShutDown();
+        if (dfsfileexists(cid, p_metaFile.c_str())) {
+            // TODO: need to remove in dfs
+            //std::remove(p_metaFile.c_str());
+        }
+        if (dfsfileexists(cid, p_metaindexFile.c_str())) {
+            // TODO: need to remove in dfs
+            //std::remove(p_metaindexFile.c_str());
+        }
+        dfs_rename(cid, (p_metaFile + "_tmp").c_str(), p_metaFile.c_str());
+        dfs_rename(cid, (p_metaindexFile + "_tmp").c_str(), p_metaindexFile.c_str());
+        if (!m_dfsfp->Initialize(-1, p_leoFSConfigPath.c_str(), p_metaFile.c_str(), O_RDONLY, 0644)) return ErrorCode::FailedOpenFile;
         m_count = static_cast<SizeType>(m_offsets.size() - 1);
         m_newdata.clear();
     }
@@ -434,7 +489,24 @@ MemMetadataSet::SaveMetadata(std::shared_ptr<Helper::DiskIO> p_metaOut, std::sha
     return ErrorCode::Success;
 }
 
+ErrorCode
+MemMetadataSet::SaveMetadata(std::shared_ptr<Helper::DFSIO> p_metaOut, std::shared_ptr<Helper::DFSIO> p_metaIndexOut)
+{
+    auto& m_offsets = *static_cast<MetadataOffsets*>(m_pOffsets.get());
+    SizeType count = Count();
+    IOBINARY(p_metaIndexOut, WriteBinary, sizeof(SizeType), (const char*)&count);
+    for (SizeType i = 0; i <= count; i++) {
+        IOBINARY(p_metaIndexOut, WriteBinary, sizeof(std::uint64_t), (const char*)(&m_offsets[i]));
+    }
 
+    IOBINARY(p_metaOut, WriteBinary, m_metadataHolder.Length(), reinterpret_cast<const char*>(m_metadataHolder.Data()));
+    if (m_newdata.size() > 0) {
+        std::shared_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
+        IOBINARY(p_metaOut, WriteBinary, m_offsets[count] - m_offsets[m_count], (const char*)m_newdata.data());
+    }
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save MetaIndex(%llu) Meta(%llu) to LeoFS\n", m_offsets.size() - 1, m_offsets.back());
+    return ErrorCode::Success;
+}
 
 ErrorCode
 MemMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile)
@@ -454,3 +526,25 @@ MemMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& p
     return ErrorCode::Success;
 }
 
+ErrorCode 
+MemMetadataSet::SaveMetadataDFS(int cid, const std::string& p_metaFile, const std::string& p_metaindexFile, const std::string& p_leoFSConfigPath) {
+    {
+        std::shared_ptr<Helper::DFSIO> metaOut = f_createDFSIO(), metaIndexOut = f_createDFSIO();
+        if (metaOut == nullptr || metaIndexOut == nullptr || !metaOut->Initialize(cid, nullptr, (p_metaFile + "_tmp").c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644) || !metaIndexOut->Initialize(cid, nullptr, (p_metaindexFile + "_tmp").c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644))
+            return ErrorCode::FailedCreateFile;
+
+        ErrorCode ret = SaveMetadata(metaOut, metaIndexOut);
+        if (ret != ErrorCode::Success) return ret;
+    }
+    if (fileexists(p_metaFile.c_str())) {
+        // TODO: need to remove in dfs
+        // std::remove(p_metaFile.c_str());
+    }
+    if (fileexists(p_metaindexFile.c_str())) {
+        // TODO: need to remove in dfs
+        // std::remove(p_metaindexFile.c_str());
+    }
+    dfs_rename(cid, (p_metaFile + "_tmp").c_str(), p_metaFile.c_str());
+    dfs_rename(cid, (p_metaindexFile + "_tmp").c_str(), p_metaindexFile.c_str());
+    return ErrorCode::Success;
+}

@@ -32,6 +32,8 @@ namespace SPTAG
 
             virtual ErrorCode SaveQuantizer(std::shared_ptr<Helper::DiskIO> p_out) const;
 
+            virtual ErrorCode SaveQuantizer(std::shared_ptr<Helper::DFSIO> p_out) const;
+
             virtual ErrorCode LoadQuantizer(std::shared_ptr<Helper::DiskIO> p_in);
 
             virtual ErrorCode LoadQuantizer(std::uint8_t* raw_bytes);
@@ -132,6 +134,22 @@ namespace SPTAG
 
         template <typename T>
         ErrorCode OPQQuantizer<T>::SaveQuantizer(std::shared_ptr<Helper::DiskIO> p_out) const
+        {
+            QuantizerType qtype = QuantizerType::OPQQuantizer;
+            VectorValueType rtype = GetEnumValueType<T>();
+            IOBINARY(p_out, WriteBinary, sizeof(QuantizerType), (char*)&qtype);
+            IOBINARY(p_out, WriteBinary, sizeof(VectorValueType), (char*)&rtype);
+            IOBINARY(p_out, WriteBinary, sizeof(DimensionType), (char*)&m_NumSubvectors);
+            IOBINARY(p_out, WriteBinary, sizeof(SizeType), (char*)&m_KsPerSubvector);
+            IOBINARY(p_out, WriteBinary, sizeof(DimensionType), (char*)&m_DimPerSubvector);
+            IOBINARY(p_out, WriteBinary, sizeof(OPQMatrixType) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector, (char*)m_codebooks.get());
+            IOBINARY(p_out, WriteBinary, sizeof(OPQMatrixType) * m_matrixDim * m_matrixDim, (char*)m_OPQMatrix.get());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Saving quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);
+            return ErrorCode::Success;
+        }
+
+        template <typename T>
+        ErrorCode OPQQuantizer<T>::SaveQuantizer(std::shared_ptr<Helper::DFSIO> p_out) const
         {
             QuantizerType qtype = QuantizerType::OPQQuantizer;
             VectorValueType rtype = GetEnumValueType<T>();

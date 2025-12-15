@@ -82,6 +82,13 @@ namespace SPTAG
                 return m_data.Save(output);
             }
 
+            inline ErrorCode Save(std::shared_ptr<Helper::DFSIO> output)
+            {
+                SizeType deleted = m_inserted.load();
+                IOBINARY(output, WriteBinary, sizeof(SizeType), (char*)&deleted);
+                return m_data.Save(output);
+            }
+
             inline ErrorCode Save(std::string filename)
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", m_data.Name().c_str(), filename.c_str());

@@ -72,6 +72,55 @@ namespace SPTAG {
         return true;
     }
 
+    bool copyfile2dfs(int cid, const char* oldpath, const char* newpath) {
+        auto input = f_createDFSIO(), output = f_createDFSIO();
+        if (input == nullptr || !input->Initialize(cid, nullptr, oldpath, O_RDONLY, 0644) || 
+            output == nullptr || !output->Initialize(cid, nullptr, newpath, O_WRONLY | O_CREAT | O_TRUNC, 0644))
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to open files: %s %s\n", oldpath, newpath);
+            return false;
+        }
+
+        const std::size_t bufferSize = 1 << 30;
+        std::unique_ptr<char[]> bufferHolder(new char[bufferSize]);
+
+        std::uint64_t readSize = input->ReadBinary(bufferSize, bufferHolder.get());
+        while (readSize != 0) {
+            if (output->WriteBinary(readSize, bufferHolder.get()) != readSize) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", newpath);
+                return false;
+            }
+            readSize = input->ReadBinary(bufferSize, bufferHolder.get());
+        }
+        input->ShutDown(); output->ShutDown();
+        return true;
+    }
+
+    bool copylocalfile2dfs(int cid, const char* oldpath, const char* newpath) {
+        auto input = f_createIO();
+        auto output = f_createDFSIO();
+        if (input == nullptr || !input->Initialize(oldpath, std::ios::binary | std::ios::in) || 
+            output == nullptr || !output->Initialize(cid, nullptr, newpath, O_WRONLY | O_CREAT | O_TRUNC, 0644))
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to open files: %s %s\n", oldpath, newpath);
+            return false;
+        }
+
+        const std::size_t bufferSize = 1 << 30;
+        std::unique_ptr<char[]> bufferHolder(new char[bufferSize]);
+
+        std::uint64_t readSize = input->ReadBinary(bufferSize, bufferHolder.get());
+        while (readSize != 0) {
+            if (output->WriteBinary(readSize, bufferHolder.get()) != readSize) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", newpath);
+                return false;
+            }
+            readSize = input->ReadBinary(bufferSize, bufferHolder.get());
+        }
+        input->ShutDown(); output->ShutDown();
+        return true;
+    }
+
 #ifndef _MSC_VER
     void listdir(std::string path, std::vector<std::string>& files) {
         if (auto dirptr = opendir(path.substr(0, path.length() - 1).c_str())) {
@@ -199,6 +248,32 @@ VectorIndex::LoadIndexConfig(Helper::IniReader& p_reader)
 ErrorCode
 VectorIndex::SaveIndexConfig(std::shared_ptr<Helper::DiskIO> p_configOut)
 {
+    if (nullptr != m_pMetadata)
+    {
+        IOSTRING(p_configOut, WriteString, "[MetaData]\n");
+        IOSTRING(p_configOut, WriteString, ("MetaDataFilePath=" + m_sMetadataFile + "\n").c_str());
+        IOSTRING(p_configOut, WriteString, ("MetaDataIndexPath=" + m_sMetadataIndexFile + "\n").c_str());
+        if (nullptr != m_pMetaToVec) IOSTRING(p_configOut, WriteString, "MetaDataToVectorIndex=true\n");
+        IOSTRING(p_configOut, WriteString, "\n");
+    }
+
+    if (m_pQuantizer)
+    {
+        IOSTRING(p_configOut, WriteString, "[Quantizer]\n");
+        IOSTRING(p_configOut, WriteString, ("QuantizerFilePath=" + m_sQuantizerFile + "\n").c_str());
+        IOSTRING(p_configOut, WriteString, "\n");
+    }
+
+    IOSTRING(p_configOut, WriteString, "[Index]\n");
+    IOSTRING(p_configOut, WriteString, ("IndexAlgoType=" + Helper::Convert::ConvertToString(GetIndexAlgoType()) + "\n").c_str());
+    IOSTRING(p_configOut, WriteString, ("ValueType=" + Helper::Convert::ConvertToString(GetVectorValueType()) + "\n").c_str());
+    IOSTRING(p_configOut, WriteString, "\n");
+
+    return SaveConfig(p_configOut);
+}
+
+ErrorCode 
+VectorIndex::SaveIndexConfig(std::shared_ptr<Helper::DFSIO> p_configOut) {
     if (nullptr != m_pMetadata)
     {
         IOSTRING(p_configOut, WriteString, "[MetaData]\n");
@@ -365,6 +440,100 @@ VectorIndex::SaveIndex(const std::string& p_folderPath)
     if (NeedRefine()) 
     {
         ret = RefineIndex(handles, nullptr);
+    }
+    else 
+    {
+        if (m_pMetadata != nullptr) ret = m_pMetadata->SaveMetadata(handles[metaStart], handles[metaStart + 1]);
+        if (ErrorCode::Success == ret) ret = SaveIndexData(handles);
+    }
+    if (m_pMetadata != nullptr) metaStart += 2;
+
+    if (ErrorCode::Success == ret && m_pQuantizer) {
+        ret = m_pQuantizer->SaveQuantizer(handles[metaStart]);
+    }
+    return ret;
+}
+
+ErrorCode VectorIndex::SaveIndexDFS(const std::string& p_leoFSConfigPath, const std::string& p_folderPath, bool recoverFromLeoFS) {
+    if (!m_bReady || GetNumSamples() - GetNumDeleted() == 0) return ErrorCode::EmptyIndex;
+
+    int cid = dfs_connect_config(p_leoFSConfigPath.c_str());
+    if (cid < 0) return ErrorCode::Fail;
+
+    std::string folderPath(p_folderPath);
+    if (!folderPath.empty() && *(folderPath.rbegin()) != FolderSep)
+    {
+        folderPath += FolderSep;
+    }
+    if (!dfsdirexists(cid, folderPath.c_str()))
+    {
+        if(dfs_mkdir(cid, folderPath.c_str()) != 0) {
+            dfs_disconnect(cid);
+            return ErrorCode::FailedCreateFile;
+        }
+    }
+
+    if (GetIndexAlgoType() == IndexAlgoType::SPANN && GetParameter("IndexDirectory", "Base") != p_folderPath) {
+        std::vector<std::string> files;
+        std::string oldFolder = GetParameter("IndexDirectory", "Base");
+        if (!oldFolder.empty() && *(oldFolder.rbegin()) != FolderSep) oldFolder += FolderSep;
+        listdir((oldFolder + "*").c_str(), files);
+        for (auto file : files) {
+            size_t firstSep = oldFolder.length(), lastSep = file.find_last_of(FolderSep);
+            std::string newFolder = folderPath + ((lastSep > firstSep)? file.substr(firstSep, lastSep - firstSep) : ""), filename = file.substr(lastSep + 1);
+            if (!dfsdirexists(cid, newFolder.c_str())) {
+                if (dfs_mkdir(cid, newFolder.c_str()) != 0) {
+                    dfs_disconnect(cid);
+                    return ErrorCode::FailedCreateFile;
+                }
+            }
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Copy file %s to %s...\n", file.c_str(), (newFolder + FolderSep + filename).c_str());
+            if (recoverFromLeoFS) {
+                if (!copyfile2dfs(cid, file.c_str(), (newFolder + FolderSep + filename).c_str())) {
+                    dfs_disconnect(cid);
+                    return ErrorCode::DiskIOFail;
+                }
+            }
+            else {
+                if (!copylocalfile2dfs(cid, file.c_str(), (newFolder + FolderSep + filename).c_str())) {
+                    dfs_disconnect(cid);
+                    return ErrorCode::DiskIOFail;
+                }
+            }
+        }
+        SetParameter("IndexDirectory", p_folderPath, "Base");
+    }
+
+    ErrorCode ret = ErrorCode::Success;
+    {
+        auto configFile = SPTAG::f_createDFSIO();
+        if (configFile == nullptr || !configFile->Initialize(cid, nullptr, (folderPath + "indexloader.ini").c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644)) return ErrorCode::FailedCreateFile;
+        if ((ret = SaveIndexConfig(configFile)) != ErrorCode::Success) return ret;
+    }
+
+    std::shared_ptr<std::vector<std::string>> indexfiles = GetIndexFiles();
+    if (nullptr != m_pMetadata) {
+        indexfiles->push_back(m_sMetadataFile);
+        indexfiles->push_back(m_sMetadataIndexFile);
+    }
+    if (m_pQuantizer) {
+        indexfiles->push_back(m_sQuantizerFile);
+    }
+    std::vector<std::shared_ptr<Helper::DFSIO>> handles;
+    for (std::string& f : *indexfiles) {
+        std::string newfile = folderPath + f;
+        if (!dfsdirexists(cid, newfile.substr(0, newfile.find_last_of(FolderSep)).c_str())) mkdir(newfile.substr(0, newfile.find_last_of(FolderSep)).c_str());
+        
+        auto ptr = SPTAG::f_createDFSIO();
+        if (ptr == nullptr || !ptr->Initialize(cid, nullptr, newfile.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644)) return ErrorCode::FailedCreateFile;
+        handles.push_back(std::move(ptr));
+    }
+
+    size_t metaStart = GetIndexFiles()->size();
+    if (NeedRefine()) 
+    {
+        // TODO: 还要RefineIndex
+        // ret = RefineIndex(handles, nullptr);
     }
     else 
     {

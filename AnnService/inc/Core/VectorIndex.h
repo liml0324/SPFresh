@@ -75,6 +75,8 @@ public:
 
     virtual ErrorCode SaveIndex(const std::string& p_folderPath);
 
+    ErrorCode SaveIndexDFS(const std::string& p_leoFSConfigPath, const std::string& p_folderPath, bool recoverFromLeoFS = false);
+
     virtual ErrorCode SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort = nullptr);
 
     virtual ErrorCode BuildIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false, bool p_shareOwnership = false);
@@ -159,7 +161,15 @@ public:
 
     virtual ErrorCode SaveConfig(std::shared_ptr<Helper::DiskIO> p_configout) = 0;
 
+    virtual ErrorCode SaveConfig(std::shared_ptr<Helper::DFSIO> p_configout) {
+        return ErrorCode::Undefined;
+    };
+
     virtual ErrorCode SaveIndexData(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams) = 0;
+
+    virtual ErrorCode SaveIndexData(const std::vector<std::shared_ptr<Helper::DFSIO>>& p_indexStreams) {
+        return ErrorCode::Undefined;
+    };
 
     virtual ErrorCode LoadConfig(Helper::IniReader& p_reader) = 0;
 
@@ -187,6 +197,8 @@ private:
     ErrorCode LoadIndexConfig(Helper::IniReader& p_reader);
 
     ErrorCode SaveIndexConfig(std::shared_ptr<Helper::DiskIO> p_configOut);
+
+    ErrorCode SaveIndexConfig(std::shared_ptr<Helper::DFSIO> p_configOut);
 
 protected:
     bool m_bReady = false;

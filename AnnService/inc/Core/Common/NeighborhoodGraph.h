@@ -643,6 +643,17 @@ break;
                 return ErrorCode::Success;
             }
 
+            ErrorCode SaveGraph(std::shared_ptr<Helper::DFSIO> output) const
+            {
+                IOBINARY(output, WriteBinary, sizeof(SizeType), (char*)&m_iGraphSize);
+                IOBINARY(output, WriteBinary, sizeof(DimensionType), (char*)&m_iNeighborhoodSize);
+
+                for (int i = 0; i < m_iGraphSize; i++)
+                    IOBINARY(output, WriteBinary, sizeof(SizeType) * m_iNeighborhoodSize, (char*)m_pNeighborhoodGraph[i]);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save %s (%d,%d) to LeoFS Finish!\n", m_pNeighborhoodGraph.Name().c_str(), m_iGraphSize, m_iNeighborhoodSize);
+                return ErrorCode::Success;
+            }
+
             ErrorCode SaveGraph(int cid, std::string sGraphFilename) const {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFS: Save %s To %s\n", m_pNeighborhoodGraph.Name().c_str(), sGraphFilename.c_str());
                 int fd = dfs_open(cid, sGraphFilename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);

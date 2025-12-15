@@ -50,6 +50,15 @@ inline bool fileexists(const char* path) {
     return stat(path, &info) == 0 && (info.st_mode & S_IFDIR) == 0;
 }
 
+inline bool dfsdirexists(int cid, const char* path) {
+    struct stat info;
+    return dfs_stat(cid, path, &info) == 0 && (info.st_mode & S_IFDIR);
+}
+inline bool dfsfileexists(int cid, const char* path) {
+    struct stat info;
+    return dfs_stat(cid, path, &info) == 0 && (info.st_mode & S_IFDIR) == 0;
+}
+
 template <class T>
 inline T min(T a, T b) {
     return a < b ? a : b;
@@ -64,6 +73,7 @@ inline T max(T a, T b) {
 #endif
 
 #define mkdir(a) mkdir(a, ACCESSPERMS)
+#define dfs_mkdir(cid, a) dfs_mkdir(cid, a, ACCESSPERMS)
 #define InterlockedCompareExchange(a,b,c) __sync_val_compare_and_swap(a, c, b)
 #define InterlockedExchange8(a,b) __sync_lock_test_and_set(a, b)
 #define Sleep(a) usleep(a * 1000)

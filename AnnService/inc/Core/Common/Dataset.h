@@ -363,6 +363,19 @@ namespace SPTAG
                 return ErrorCode::Success;
             }
 
+            ErrorCode Save(std::shared_ptr<Helper::DFSIO> p_out) const
+            {
+                SizeType CR = R();
+                IOBINARY(p_out, WriteBinary, sizeof(SizeType), (char*)&CR);
+                IOBINARY(p_out, WriteBinary, sizeof(DimensionType), (char*)&mycols);
+                for (SizeType i = 0; i < CR; i++) {
+                    IOBINARY(p_out, WriteBinary, sizeof(T) * mycols, (char*)At(i));
+                }
+
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save %s (%d,%d) to LeoFS Finish!\n", name.c_str(), CR, mycols);
+                return ErrorCode::Success;
+            }
+
             ErrorCode Save(std::string sDataPointsFileName) const
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", name.c_str(), sDataPointsFileName.c_str());

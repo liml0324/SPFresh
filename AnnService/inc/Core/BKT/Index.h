@@ -167,6 +167,7 @@ namespace SPTAG
 
             ErrorCode SaveConfig(std::shared_ptr<Helper::DiskIO> p_configout);
             ErrorCode SaveIndexData(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams);
+            ErrorCode SaveIndexData(const std::vector<std::shared_ptr<Helper::DFSIO>>& p_indexStreams);
 
             ErrorCode LoadConfig(Helper::IniReader& p_reader);
             ErrorCode LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams);

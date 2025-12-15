@@ -646,6 +646,18 @@ break;
                 return ErrorCode::Success;
             }
 
+            ErrorCode SaveTrees(std::shared_ptr<Helper::DFSIO> p_out) const
+            {
+                std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
+                IOBINARY(p_out, WriteBinary, sizeof(m_iTreeNumber), (char*)&m_iTreeNumber);
+                IOBINARY(p_out, WriteBinary, sizeof(SizeType) * m_iTreeNumber, (char*)m_pTreeStart.data());
+                SizeType treeNodeSize = (SizeType)m_pTreeRoots.size();
+                IOBINARY(p_out, WriteBinary, sizeof(treeNodeSize), (char*)&treeNodeSize);
+                IOBINARY(p_out, WriteBinary, sizeof(BKTNode) * treeNodeSize, (char*)m_pTreeRoots.data());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save BKT (%d,%d) to LeoFS Finish!\n", m_iTreeNumber, treeNodeSize);
+                return ErrorCode::Success;
+            }
+
             ErrorCode SaveTrees(std::string sTreeFileName) const
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save BKT to %s\n", sTreeFileName.c_str());

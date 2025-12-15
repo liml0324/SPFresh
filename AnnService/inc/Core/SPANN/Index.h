@@ -243,9 +243,15 @@ namespace SPTAG
                 std::string filename = m_options.m_persistentBufferPath + "_headIndex";
                 // Flush SPTAG
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Saving in-memory index\n");
-                m_index->SaveIndex(filename);
+                if (m_options.m_saveToLeoFS) {
+                    m_index->SaveIndexDFS(m_options.m_leoFSConfigPath, filename, m_options.m_recoverFromLeoFS);
+                }
+                else {
+                    m_index->SaveIndex(filename);
+                }
                 // Flush block pool states & block mapping states
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Saving storage states\n");
+                // TODO: save extraSearcher to dfs
                 m_extraSearcher->Checkpoint(m_options.m_persistentBufferPath);
             }
 

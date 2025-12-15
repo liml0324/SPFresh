@@ -30,7 +30,15 @@ public:
 
     virtual ErrorCode SaveMetadata(std::shared_ptr<Helper::DiskIO> p_metaOut, std::shared_ptr<Helper::DiskIO> p_metaIndexOut) = 0;
 
+    virtual ErrorCode SaveMetadata(std::shared_ptr<Helper::DFSIO> p_metaOut, std::shared_ptr<Helper::DFSIO> p_metaIndexOut) {
+        return ErrorCode::Undefined;
+    };
+
     virtual ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile) = 0;
+
+    virtual ErrorCode SaveMetadataDFS(int cid, const std::string& p_metaFile, const std::string& p_metaindexFile, const std::string& p_leoFSConfigPath = "") {
+        return ErrorCode::Undefined;
+    };
  
     virtual void AddBatch(MetadataSet& data);
     
@@ -66,7 +74,11 @@ public:
 
     ErrorCode SaveMetadata(std::shared_ptr<Helper::DiskIO> p_metaOut, std::shared_ptr<Helper::DiskIO> p_metaIndexOut);
 
+    ErrorCode SaveMetadata(std::shared_ptr<Helper::DFSIO> p_metaOut, std::shared_ptr<Helper::DFSIO> p_metaIndexOut);
+
     ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile);
+
+    ErrorCode SaveMetadataDFS(int cid, const std::string& p_metaFile, const std::string& p_metaindexFile, const std::string& p_leoFSConfigPath = "");
 
 private:
     std::shared_ptr<void> m_lock;
@@ -76,6 +88,9 @@ private:
     SizeType m_count;
 
     std::shared_ptr<Helper::DiskIO> m_fp = nullptr;
+
+    // TODO: need to consider the case of DFS
+    std::shared_ptr<Helper::DFSIO> m_dfsfp = nullptr; 
     
     std::vector<std::uint8_t> m_newdata;
 };
@@ -113,7 +128,11 @@ public:
 
     ErrorCode SaveMetadata(std::shared_ptr<Helper::DiskIO> p_metaOut, std::shared_ptr<Helper::DiskIO> p_metaIndexOut);
 
+    ErrorCode SaveMetadata(std::shared_ptr<Helper::DFSIO> p_metaOut, std::shared_ptr<Helper::DFSIO> p_metaIndexOut);
+
     ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile);
+
+    ErrorCode SaveMetadataDFS(int cid, const std::string& p_metaFile, const std::string& p_metaindexFile, const std::string& p_leoFSConfigPath = "");
 
 private:
     ErrorCode Init(std::shared_ptr<Helper::DiskIO> p_metain, std::shared_ptr<Helper::DiskIO> p_metaindexin,
