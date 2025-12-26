@@ -28,6 +28,7 @@ namespace SPTAG::SPANN {
             static char* filePath;
             static thread_local int fd;
             static thread_local int cid;
+            tbb::concurrent_queue<std::pair<int, int>> m_cidFds;
 
             static constexpr AddressType kSsdImplMaxNumBlocks = (300ULL << 30) >> PageSizeEx; // 300G
             static constexpr const char* kLeoFSDepth = "SPFRESH_LEOFS_IO_DEPTH";
@@ -85,6 +86,9 @@ namespace SPTAG::SPANN {
             std::vector<int64_t> read_bytes_vec;
             std::vector<int64_t> write_bytes_vec;
             std::vector<int64_t> read_blocks_time_vec;
+
+            std::vector<int64_t> multi_read_time_vec;
+            std::vector<int64_t> multi_read_times;
 
             std::mutex m_uniqueResourceMutex;
 
@@ -1116,7 +1120,7 @@ namespace SPTAG::SPANN {
                 while (!m_buffer.try_pop(tmpblocks));
                 memcpy((AddressType*)tmpblocks, postingSize, sizeof(AddressType) * (oldblocks + 1));
                 m_pBlockController.GetBlocks((AddressType*)tmpblocks + 1 + oldblocks, allocblocks);
-                m_pBlockController.WriteBlocks((AddressType*)tmpblocks + 1 + oldblocks, allocblocks, newValue);
+                m_pBlockController.NewWriteBlocks((AddressType*)tmpblocks + 1 + oldblocks, allocblocks, newValue);
                 *((int64_t*)tmpblocks) = newSize;
 
                 // 这里也是为了保证Checkpoint，所以将原本没用满的块释放，分配一个新的
@@ -1126,7 +1130,7 @@ namespace SPTAG::SPANN {
             }
             else {  // 否则直接分配一组块接在后面
                 m_pBlockController.GetBlocks(postingSize + 1 + oldblocks, allocblocks);
-                m_pBlockController.WriteBlocks(postingSize + 1 + oldblocks, allocblocks, value);
+                m_pBlockController.NewWriteBlocks(postingSize + 1 + oldblocks, allocblocks, value);
                 *postingSize = newSize;
             }
             if (m_LeoFSUseLock) {

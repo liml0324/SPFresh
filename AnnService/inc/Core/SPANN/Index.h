@@ -204,7 +204,11 @@ namespace SPTAG
             ErrorCode BuildIndexInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader);
 
         public:
-            bool AllFinished() { if (m_options.m_useKV || m_options.m_useSPDK || m_options.m_useFileIO || m_options.m_useLeoFS) return m_extraSearcher->AllFinished(); return true; }
+            bool AllFinished() { 
+                if ((m_options.m_appendThreadNum > 0 || m_options.m_reassignThreadNum > 0) && (m_options.m_useKV || m_options.m_useSPDK || m_options.m_useFileIO || m_options.m_useLeoFS)) 
+                    return m_extraSearcher->AllFinished(); 
+                return true; 
+            }
 
             void GetDBStat() { 
                 if (m_options.m_useKV || m_options.m_useSPDK || m_options.m_useFileIO || m_options.m_useLeoFS) m_extraSearcher->GetDBStats(); 

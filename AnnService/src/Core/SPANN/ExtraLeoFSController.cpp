@@ -178,17 +178,32 @@ bool LeoFSIO::BlockController::Initialize(int batchSize) {
         fprintf(stderr, "LeoFSIO::BlockController::Initialize failed: LeoFSConfigPath is not set\n");
         return false;
     }
-    cid = dfs_connect_config(LeoFSConfigPath);
-    if (cid < 0) {
-        fprintf(stderr, "LeoFSIO::BlockController::Initialize failed: dfs_connect_config failed\n");
-        return false;
-    }       
 
-    fd = dfs_open(cid, filePath, O_RDWR | O_DIRECT, 0666);
-    if (fd < 0) {
-        auto err_str = dfs_errno(cid);
-        fprintf(stderr, "open failed: %s\n", err_str);
-        return false;
+    cid = -1;
+    fd = -1;
+    while(!m_cidFds.empty()) {
+        std::pair<int, int> p;
+        if(m_cidFds.try_pop(p)) {
+            cid = p.first;
+            fd = p.second;
+            break;
+        }
+    }
+    if (cid < 0) {
+        cid = dfs_connect_config(LeoFSConfigPath);
+        if (cid < 0) {
+            fprintf(stderr, "LeoFSIO::BlockController::Initialize failed: dfs_connect_config failed\n");
+            return false;
+        }
+
+        if (fd < 0) {
+            fd = dfs_open(cid, filePath, O_RDWR | O_DIRECT, 0666);
+            if (fd < 0) {
+                auto err_str = dfs_errno(cid);
+                fprintf(stderr, "open failed: %s\n", err_str);
+                return false;
+            }
+        }
     }
 
     aligned_buf = aligned_alloc(m_ssdLeoFSAlignment, PageSize);
@@ -221,6 +236,12 @@ bool LeoFSIO::BlockController::Initialize(int batchSize) {
     }
     while(read_blocks_time_vec.size() <= id) {
         read_blocks_time_vec.push_back(0);
+    }
+    while(multi_read_time_vec.size() <= id) {
+        multi_read_time_vec.push_back(0);
+    }
+    while(multi_read_times.size() <= id) {
+        multi_read_times.push_back(0);
     }
     m_currIoContext.sub_io_requests.resize(m_ssdLeoFSDepth);
     m_currIoContext.in_flight = 0;
@@ -468,7 +489,8 @@ bool LeoFSIO::BlockController::NewReadBlocks(const std::vector<AddressType*>& p_
         }
     }
 
-    
+    multi_read_times[id]++;
+
     for (int currSubIoStartId = 0; currSubIoStartId < subIoRequests.size(); currSubIoStartId += batch_size) {
         int currSubIoEndId = (currSubIoStartId + batch_size) > subIoRequests.size() ? subIoRequests.size() : currSubIoStartId + batch_size;
         int currSubIoIdx = currSubIoStartId;
@@ -487,7 +509,10 @@ bool LeoFSIO::BlockController::NewReadBlocks(const std::vector<AddressType*>& p_
             iocbs[i] = &(currSubIo->myiocb);
             currSubIoIdx++;
         }
+        auto begin = std::chrono::high_resolution_clock::now();
         int ret = dfs_multi_pread(cid, fd, totalToSubmit, iocbs.data());
+        auto end = std::chrono::high_resolution_clock::now();
+        multi_read_time_vec[id] += std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count();
 
         if (ret >= 0) {
             for (int i = 0; i < totalToSubmit; i++) {
@@ -717,6 +742,14 @@ bool LeoFSIO::BlockController::NewWriteBlocks(AddressType* p_data, int p_size, c
     return true;
 }
 
+int64_t Sum(std::vector<int64_t>& vec) {
+    int64_t sum = 0;
+    for (int i = 0; i < vec.size(); i++) {
+        sum += vec[i];
+    }
+    return sum;
+}
+
 
 bool LeoFSIO::BlockController::IOStatistics() {
     int currReadCount = 0;
@@ -771,6 +804,9 @@ bool LeoFSIO::BlockController::IOStatistics() {
     std::cout << "Remain free IO requests: " << m_currIoContext.free_sub_io_requests.size() << std::endl;
     std::cout << "Read Blocks Time: " << read_blocks_time << "ns" << std::endl;
     std::cout << "Batch Read Times: " << m_batchReadTimes.load() << " Batch Read Timeouts: " << m_batchReadTimeouts.load() << std::endl;
+    std::cout << "dfs_multi_pread avg time: " << Sum(multi_read_time_vec) / max(Sum(multi_read_times), 1L) << "ns" << std::endl;
+
+    dfs_get_io_stats();
     return true;
 }
 
@@ -786,13 +822,31 @@ bool LeoFSIO::BlockController::ShutDown() {
             AddressType currBlockAddress;
             m_blockAddresses.try_pop(currBlockAddress);
         }
+        while (!m_cidFds.empty()) {
+            std::pair<int, int> currCidFd;
+            int cid = -1, fd = -1;
+            if (m_cidFds.try_pop(currCidFd)) {
+                cid = currCidFd.first;
+                fd = currCidFd.second;
+                if (cid >= 0) {
+                    if (fd >= 0) {
+                        dfs_close(cid, fd);
+                    }
+                    dfs_disconnect(cid);
+                }
+            }
+        }
         // dfs_close(cid, fd);
         // dfs_disconnect(cid);
     }
     if (cid >= 0) {
-        if (fd >= 0)
-            dfs_close(cid, fd);
-        dfs_disconnect(cid);
+        // dfs_dump_io_stats(cid);
+        if (fd >= 0){
+            m_cidFds.push({cid, fd});
+        }
+        else {
+            dfs_disconnect(cid);
+        }
     }
     
     m_idQueue.push(id);
