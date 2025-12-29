@@ -23,8 +23,201 @@ namespace SPTAG::SPANN {
     class LeoFSIO : public Helper::KeyValueIO {
         class BlockController {
         private:
+            class WriteBuffer {
+            private:
+                tbb::concurrent_queue<char*> m_bufQueue;
+                std::unordered_map<AddressType, std::pair<char*, int>> m_buffer[2];
+                std::unordered_map<AddressType, std::pair<char*, int>> *m_pCurrBuffer;
+                std::unordered_map<AddressType, std::pair<char*, int>> *m_pDumpBuffer;
+                std::shared_mutex m_mutex;
+                std::mutex m_dumpMutex;
+                std::vector<int> m_cids;
+                std::vector<int> m_fds;
+                std::condition_variable m_cv;
+                bool m_isDumping;
+                int m_dumpThreadNum;
+                int m_pageSize;
+                int m_bufferSize;
+                int m_batchSize;
+                pthread_t m_pDumpMainThread;
+            public:
+                WriteBuffer(int pageSize, int bufferSize, int dumpThreadNum, std::string leofsConfigPath, std::string filePath, int batchSize) {
+                    m_pageSize = pageSize;
+                    m_bufferSize = bufferSize / 2;
+                    m_dumpThreadNum = dumpThreadNum;
+                    m_pCurrBuffer = &m_buffer[0];
+                    m_pDumpBuffer = &m_buffer[1];
+                    m_isDumping = false;
+                    m_batchSize = batchSize;
+                    m_pDumpMainThread = -1;
+                    for (int i = 0; i < 2 * m_bufferSize; i++) {
+                        char* buffer = new char[m_bufferSize];
+                        m_bufQueue.push(buffer);
+                    }
+                    m_cids.resize(m_dumpThreadNum, -1);
+                    m_fds.resize(m_dumpThreadNum, -1);
+                    for (int i = 0; i < m_dumpThreadNum; i++) {
+                        auto cid = dfs_connect_config(leofsConfigPath.c_str());
+                        if (cid < 0) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "WriteBuffer: connect to leofs failed\n");
+                            exit(0);
+                        }
+                        m_cids[i] = cid;
+                        auto fd = dfs_open(cid, filePath.c_str(), O_WRONLY | O_CREAT, 0644);
+                        if (fd < 0) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "WriteBuffer: open file failed\n");
+                            exit(0);
+                        }
+                        m_fds[i] = fd;
+                    }
+                };
+
+                ~WriteBuffer() {
+                    std::unique_lock<std::shared_mutex> lock(m_mutex);
+                    // TODO: consider dump buffer here
+                    if (m_pDumpMainThread >= 0) {
+                        void *ret_val = nullptr;
+                        pthread_join(m_pDumpMainThread, &ret_val);
+                    }
+                    while (!m_bufQueue.empty()) {
+                        char* bufptr = nullptr;
+                        if (m_bufQueue.try_pop(bufptr)) {
+                            delete[] bufptr;
+                        }
+                    }
+                    for (auto &it : m_buffer[0]) {
+                        delete[] it.second.first;
+                    }
+                    for (auto &it : m_buffer[1]) {
+                        delete[] it.second.first;
+                    }
+                    for (int i = 0; i < m_dumpThreadNum; i++) {
+                        if (m_cids[i] >= 0) {
+                            if (m_fds[i] >= 0) {
+                                dfs_close(m_cids[i], m_fds[i]);
+                            }
+                            dfs_disconnect(m_cids[i]);
+                        }
+                    }
+                }
+
+                static void dumpThread(std::vector<std::pair<AddressType, std::pair<char*, int>>> &dumpJobs, int cid, int fd, int batchSize) {
+                    int totalSize = dumpJobs.size();
+                    std::vector<dfs_iocb> iocbs;
+                    std::vector<dfs_iocb*> iocb_ptr;
+                    iocbs.resize(batchSize);
+                    iocb_ptr.resize(batchSize);
+                    for (int i = 0; i < batchSize; i++) {
+                        iocb_ptr[i] = &iocbs[i];
+                    }
+                    for (int i = 0; i < totalSize; i += batchSize) {
+                        int batch = std::min(batchSize, totalSize - i);
+                        for (int j = 0; j < batch; j++) {
+                            auto &it = dumpJobs[i + j];
+                            iocbs[j].aio_lio_opcode = 1;
+                            iocbs[j].aio_fildes = fd;
+                            iocbs[j].aio_buf = reinterpret_cast<void*>(it.second.first);
+                            iocbs[j].aio_nbytes = it.second.second;
+                            iocbs[j].aio_offset = it.first;
+                        }
+                        dfs_multi_pwrite(cid, fd, batch, iocb_ptr.data());
+                    }
+                }
+
+                static void* dump(void *args) {
+                    WriteBuffer *wb = static_cast<WriteBuffer*>(args);
+                    std::vector<std::vector<std::pair<AddressType, std::pair<char*, int>>>> dumpJobs(wb->m_dumpThreadNum);
+                    int i = 0;
+                    for (auto &it : *(wb->m_pDumpBuffer)) {
+                        dumpJobs[i % wb->m_dumpThreadNum].push_back(it);
+                        i++;
+                    }
+                    std::thread dumpThreads[wb->m_dumpThreadNum];
+                    for (int i = 0; i < wb->m_dumpThreadNum; i++) {
+                        dumpThreads[i] = std::thread(dumpThread, std::ref(dumpJobs[i]), wb->m_cids[i], wb->m_fds[i], wb->m_batchSize);
+                    }
+                    for (int i = 0; i < wb->m_dumpThreadNum; i++) {
+                        dumpThreads[i].join();
+                    }
+                    for (auto &it : *(wb->m_pDumpBuffer)) {
+                        wb->m_bufQueue.push(it.second.first);
+                    }
+                    wb->m_pDumpBuffer->clear();
+                    // wb->m_isDumping = false;
+                    // wb->m_cv.notify_all();
+                    return nullptr;
+                }
+
+                void dumpAsync() {
+                    // m_isDumping = true;
+                    std::swap(m_pCurrBuffer, m_pDumpBuffer);
+                    if (m_pDumpBuffer->size() == 0) {
+                        // m_isDumping = false;
+                        return;
+                    }
+                    pthread_create(&m_pDumpMainThread, nullptr, dump, this);
+                }
+
+                void forceDump() {
+                    std::unique_lock<std::shared_mutex> lock(m_mutex);
+                    if (m_pDumpMainThread >= 0) {
+                        void *ret_val = nullptr;
+                        pthread_join(m_pDumpMainThread, &ret_val);
+                    }
+                    if (m_pDumpBuffer->size() > 0) {
+                        pthread_create(&m_pDumpMainThread, nullptr, dump, this);
+                        void *ret_val = nullptr;
+                        pthread_join(m_pDumpMainThread, &ret_val);
+                        m_pDumpMainThread = -1;
+                    }
+                    std::swap(m_pCurrBuffer, m_pDumpBuffer);
+                    if (m_pDumpBuffer->size() > 0) {
+                        pthread_create(&m_pDumpMainThread, nullptr, dump, this);
+                        void *ret_val = nullptr;
+                        pthread_join(m_pDumpMainThread, &ret_val);
+                        m_pDumpMainThread = -1;
+                    }
+                }
+
+                bool put(AddressType addr, void *value, int size) {
+                    std::unique_lock<std::shared_mutex> lock(m_mutex);
+                    if (m_pCurrBuffer->size() >= m_bufferSize) {
+                        if (m_pDumpMainThread >= 0) {
+                            void *ret_val = nullptr;
+                            pthread_join(m_pDumpMainThread, &ret_val);
+                        }
+                        dumpAsync();
+                    }
+                    auto it = m_pCurrBuffer->find(addr);
+                    if (it != m_pCurrBuffer->end()) {
+                        auto ptr = it->second.first;
+                        memcpy(ptr, value, size);
+                        it->second.second = size;
+                        return true;
+                    }
+                    char *buf_ptr = nullptr;
+                    while(!m_bufQueue.try_pop(buf_ptr));
+                    memcpy(buf_ptr, value, size);
+                    m_pCurrBuffer->insert(std::make_pair(addr, std::pair<char*, int>(buf_ptr, size)));
+                    return true;
+                }
+
+                bool get(AddressType addr, void *value, int size) {
+                    std::shared_lock<std::shared_mutex> lock(m_mutex);
+                    auto it = m_pCurrBuffer->find(addr);
+                    if (it != m_pCurrBuffer->end()) {
+                        if (it->second.second != size) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "WriteBuffer: Get size inconsistent!");
+                        }
+                        memcpy(value, it->second.first, std::min(it->second.second, size));
+                        return true;
+                    }
+                    return false;
+                }
+            };
             static constexpr const char* kLeoFSPath = "SPFRESH_LEOFS_IO_PATH";
             static constexpr const char* kLeoFSConfigPath = "SPFRESH_LEOFS_IO_CONFIG_PATH";
+            std::string m_LeoFSConfigPath;
             static char* filePath;
             static thread_local int fd;
             static thread_local int cid;
@@ -38,6 +231,7 @@ namespace SPTAG::SPANN {
             static constexpr const char* kLeoFSAlignment = "SPFRESH_LEOFS_IO_ALIGNMENT";
             static constexpr int kSsdLeoFSDefaultAlignment = 4096;
 
+            WriteBuffer *m_pWriteBuffer = nullptr;
             // RWThreadPool *m_prwThreadPool;
             static thread_local std::atomic_uint32_t inflight_jobs;
 
@@ -134,15 +328,19 @@ namespace SPTAG::SPANN {
 
             bool NewReadBlocks(AddressType* p_data, std::string* p_value, const std::chrono::microseconds &timeout = std::chrono::microseconds::max());
 
+            bool BufferedReadBlocks(AddressType* p_data, std::string* p_value, const std::chrono::microseconds &timeout = std::chrono::microseconds::max());
+
             bool ReadBlocks(AddressType* p_data, ByteArray& p_value, const std::chrono::microseconds &timeout = std::chrono::microseconds::max());
 
             bool ReadBlocks(const std::vector<AddressType*>& p_data, std::vector<std::string>* p_value, const std::chrono::microseconds &timeout = std::chrono::microseconds::max());
 
             bool ReadBlocks(const std::vector<AddressType*>& p_data, std::vector<ByteArray>& p_value, const std::chrono::microseconds &timeout = std::chrono::microseconds::max());
 
-            bool NewReadBlocks(const std::vector<AddressType*>& p_data, std::vector<std::string>* p_value, const std::chrono::microseconds &timeout = std::chrono::microseconds::max());
+            bool NewReadBlocks(const std::vector<AddressType*>& p_data, std::vector<std::string>* p_values, const std::chrono::microseconds &timeout = std::chrono::microseconds::max());
 
             bool ReadBlocksAsync(const std::vector<AddressType*>& p_data, std::vector<std::string>* p_values, const std::chrono::microseconds &timeout = std::chrono::microseconds::max());
+
+            bool BufferedReadBlocks(const std::vector<AddressType*>& p_data, std::vector<std::string>* p_values, const std::chrono::microseconds &timeout = std::chrono::microseconds::max());
 
             bool WriteBlocks(AddressType* p_data, int p_size, const std::string& p_value);
 
@@ -150,9 +348,15 @@ namespace SPTAG::SPANN {
 
             bool NewWriteBlocks(AddressType* p_data, int p_size, const std::string& p_value);
 
+            bool BufferedWriteBlocks(AddressType* p_data, int p_size, const std::string& p_value);
+
             bool IOStatistics();
 
             bool ShutDown();
+
+            bool SetWriteBuffer(Options *opt) {
+                m_pWriteBuffer = new WriteBuffer(PageSize, opt->m_writeBufferSize, opt->m_writeBufferDumpThreadNum, m_LeoFSConfigPath, std::string(filePath), m_batchSize);
+            };
 
             int RemainBlocks() {
                 return m_blockAddresses.unsafe_size();
@@ -544,6 +748,10 @@ namespace SPTAG::SPANN {
             m_bufferLimit = bufferSize;
             m_pOpt = opt;
             m_pBlockController.SetOpt(opt);
+            m_mergeCount = 0;
+            m_mergeSize = 0;
+            m_putBlockCount = 0;
+            m_putCount = 0;
 
             if (!m_pOpt) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "LeoFSIO: No options provided!\n");
@@ -626,6 +834,11 @@ namespace SPTAG::SPANN {
             } else if (!m_pBlockController.Initialize(batchSize)) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to Initialize LeoFSIO!\n");
                 exit(0);
+            }
+
+            if (opt && opt->m_useBufferedWrite) {
+                m_pBlockController.SetWriteBuffer(opt);
+                m_useBufferedWrite = true;
             }
             m_shutdownCalled = false;
         }
@@ -747,7 +960,13 @@ namespace SPTAG::SPANN {
             //     return ErrorCode::Success;
             // }
             auto begin_time = std::chrono::high_resolution_clock::now();
-            auto result = m_pBlockController.NewReadBlocks((AddressType*)At(key), value);
+            bool result;
+            if (m_useBufferedWrite) {
+                result = m_pBlockController.BufferedReadBlocks((AddressType*)At(key), value);
+            }
+            else {
+                result = m_pBlockController.NewReadBlocks((AddressType*)At(key), value);
+            }
             auto end_time = std::chrono::high_resolution_clock::now();
             read_time_vec[id] += std::chrono::duration_cast<std::chrono::microseconds>(end_time - begin_time).count();
             get_times_vec[id]++;
@@ -794,7 +1013,14 @@ namespace SPTAG::SPANN {
             //     return ErrorCode::Success;
             // }
             auto begin_time = std::chrono::high_resolution_clock::now();
-            auto result = m_pBlockController.NewReadBlocks((AddressType*)At(key), value, timeout);
+            bool result;
+            if (m_useBufferedWrite) {
+                result = m_pBlockController.BufferedReadBlocks((AddressType*)At(key), value, timeout);
+            }
+            else {
+                result = m_pBlockController.NewReadBlocks((AddressType*)At(key), value, timeout);
+            }
+            
             auto end_time = std::chrono::high_resolution_clock::now();
             read_time_vec[id] += std::chrono::duration_cast<std::chrono::microseconds>(end_time - begin_time).count();
             get_times_vec[id]++;
@@ -858,7 +1084,10 @@ namespace SPTAG::SPANN {
             // if (m_pBlockController.ReadBlocks(blocks, values, timeout)) return ErrorCode::Success;
             // auto result = m_pBlockController.ReadBlocks(blocks, values, timeout);
             bool result;
-            if (m_LeoFSUseAsync) {
+            if (m_useBufferedWrite) {
+                result = m_pBlockController.BufferedReadBlocks(blocks, values, timeout);
+            }
+            else if (m_LeoFSUseAsync) {
                 result = m_pBlockController.ReadBlocksAsync(blocks, values, timeout);
             }
             else {
@@ -911,6 +1140,8 @@ namespace SPTAG::SPANN {
 
         ErrorCode Put(SizeType key, const std::string& value) override {
             int blocks = ((value.size() + PageSize - 1) >> PageSizeEx);
+            m_putBlockCount += blocks;
+            m_putCount++;
             if (blocks >= m_blockLimit) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to put key:%d value:%lld since value too long!\n", key, value.size());
                 return ErrorCode::Fail;
@@ -964,7 +1195,12 @@ namespace SPTAG::SPANN {
             // postingSize小于0说明是新分配的Mapping块，直接获取磁盘块，写入数据
             if (*postingSize < 0) {
                 m_pBlockController.GetBlocks(postingSize + 1, blocks);
-                m_pBlockController.NewWriteBlocks(postingSize + 1, blocks, value);
+                if (m_useBufferedWrite) {
+                    m_pBlockController.BufferedWriteBlocks(postingSize + 1, blocks, value);
+                }
+                else {
+                    m_pBlockController.NewWriteBlocks(postingSize + 1, blocks, value);
+                }
                 *postingSize = value.size();
             }
             else {
@@ -974,7 +1210,12 @@ namespace SPTAG::SPANN {
                 // 获取一组新的磁盘块，直接写入数据
                 // 为保证Checkpoint的效果，这里必须分配新的块进行写入
                 m_pBlockController.GetBlocks((AddressType*)tmpblocks + 1, blocks);
-                m_pBlockController.NewWriteBlocks((AddressType*)tmpblocks + 1, blocks, value);
+                if (m_useBufferedWrite) {
+                    m_pBlockController.BufferedWriteBlocks((AddressType*)tmpblocks + 1, blocks, value);
+                }
+                else {
+                    m_pBlockController.NewWriteBlocks((AddressType*)tmpblocks + 1, blocks, value);
+                }
                 *((int64_t*)tmpblocks) = value.size();
 
                 // 释放原有的块
@@ -1068,6 +1309,8 @@ namespace SPTAG::SPANN {
         }
 
         ErrorCode Merge(SizeType key, const std::string& value) {
+            m_mergeCount++;
+            m_mergeSize += value.size();
             if (m_LeoFSUseLock) {
                 m_rwMutex[hash(key)].lock();
             }
@@ -1113,14 +1356,24 @@ namespace SPTAG::SPANN {
             if (sizeInPage != 0) {
                 std::string newValue;
                 AddressType readreq[] = { sizeInPage, *(postingSize + 1 + oldblocks) };
-                m_pBlockController.NewReadBlocks(readreq, &newValue);
+                if (m_useBufferedWrite) {
+                    m_pBlockController.BufferedReadBlocks(readreq, &newValue);
+                }
+                else {
+                    m_pBlockController.NewReadBlocks(readreq, &newValue);
+                }
                 newValue += value;
 
                 uintptr_t tmpblocks;
                 while (!m_buffer.try_pop(tmpblocks));
                 memcpy((AddressType*)tmpblocks, postingSize, sizeof(AddressType) * (oldblocks + 1));
                 m_pBlockController.GetBlocks((AddressType*)tmpblocks + 1 + oldblocks, allocblocks);
-                m_pBlockController.NewWriteBlocks((AddressType*)tmpblocks + 1 + oldblocks, allocblocks, newValue);
+                if (m_useBufferedWrite) {
+                    m_pBlockController.BufferedWriteBlocks((AddressType*)tmpblocks + 1 + oldblocks, allocblocks, newValue);
+                }
+                else {
+                    m_pBlockController.NewWriteBlocks((AddressType*)tmpblocks + 1 + oldblocks, allocblocks, newValue);
+                }
                 *((int64_t*)tmpblocks) = newSize;
 
                 // 这里也是为了保证Checkpoint，所以将原本没用满的块释放，分配一个新的
@@ -1130,7 +1383,12 @@ namespace SPTAG::SPANN {
             }
             else {  // 否则直接分配一组块接在后面
                 m_pBlockController.GetBlocks(postingSize + 1 + oldblocks, allocblocks);
-                m_pBlockController.NewWriteBlocks(postingSize + 1 + oldblocks, allocblocks, value);
+                if (m_useBufferedWrite) {
+                    m_pBlockController.BufferedWriteBlocks(postingSize + 1 + oldblocks, allocblocks, value);
+                }
+                else {
+                    m_pBlockController.NewWriteBlocks(postingSize + 1 + oldblocks, allocblocks, value);
+                }
                 *postingSize = newSize;
             }
             if (m_LeoFSUseLock) {
@@ -1209,6 +1467,10 @@ namespace SPTAG::SPANN {
                 auto cache_stat = m_pShardedLRUCache->get_stat();
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Cache queries: %lld, Cache hits: %lld, Hit rates: %lf\n", cache_stat.first, cache_stat.second, cache_stat.second == 0 ? 0 : (double)cache_stat.second / cache_stat.first);
             }
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Avg merge size: %lf, merge count: %lld\n", (double)m_mergeSize.load() / m_mergeCount.load(), m_mergeCount.load());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Avg put block count: %lf, put count: %lld\n", (double)m_putBlockCount.load() / m_putCount.load(), m_putCount.load());
+            m_putBlockCount = 0;
+            m_putCount = 0;
             m_pBlockController.IOStatistics();
         }
 
@@ -1450,9 +1712,16 @@ namespace SPTAG::SPANN {
 
         Options *m_pOpt;
 
+        bool m_useBufferedWrite = false;
+
+        std::atomic_int64_t m_mergeSize;
+        std::atomic_int64_t m_mergeCount;
+        std::atomic_int64_t m_putBlockCount;
+        std::atomic_int64_t m_putCount;
+
         inline int hash(int key) {
             return key % m_LeoFSLockSize;
         }
     };
 }
-#endif
+#endif // EXTRA_LEOFS_CONTROLLER_H

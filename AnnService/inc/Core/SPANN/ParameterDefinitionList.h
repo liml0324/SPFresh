@@ -113,6 +113,9 @@ DefineSSDParameter(m_recoveryTest, bool, false, "RecoveryTest")
 DefineSSDParameter(m_saveToLeoFS, bool, false, "SaveToLeoFS")
 DefineSSDParameter(m_recoverFromLeoFS, bool, false, "RecoverFromLeoFS")
 DefineSSDParameter(m_leoFSConfigPath, std::string, std::string(""), "LeoFSConfigPath")
+DefineSSDParameter(m_useBufferedWrite, bool, false, "UseBufferedWrite")
+DefineSSDParameter(m_writeBufferSize, int, 4096, "WriteBufferSize")
+DefineSSDParameter(m_writeBufferDumpThreadNum, int, 1, "WriteBufferDumpThreadNum")
 
 // GPU Building
 DefineSSDParameter(m_gpuSSDNumTrees, int, 100, "GPUSSDNumTrees")

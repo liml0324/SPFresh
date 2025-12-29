@@ -115,6 +115,9 @@ namespace SPTAG {
             bool m_saveToLeoFS;
             bool m_recoverFromLeoFS;
             std::string m_leoFSConfigPath;
+            bool m_useBufferedWrite;
+            int m_writeBufferSize;
+            int m_writeBufferDumpThreadNum;
 
             // GPU building
             int m_gpuSSDNumTrees;
