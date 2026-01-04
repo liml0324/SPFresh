@@ -25,12 +25,13 @@ namespace SPTAG::SPANN {
         private:
             class WriteBuffer {
             private:
-                tbb::concurrent_queue<char*> m_bufQueue;
+                std::queue<char*> m_bufQueue;
                 std::unordered_map<AddressType, std::pair<char*, int>> m_buffer[2];
                 std::unordered_map<AddressType, std::pair<char*, int>> *m_pCurrBuffer;
                 std::unordered_map<AddressType, std::pair<char*, int>> *m_pDumpBuffer;
                 std::shared_mutex m_mutex;
-                std::mutex m_dumpMutex;
+                std::shared_mutex m_dumpMutex;
+                std::mutex m_queueMutex;
                 std::vector<int> m_cids;
                 std::vector<int> m_fds;
                 std::condition_variable m_cv;
@@ -41,7 +42,7 @@ namespace SPTAG::SPANN {
                 int m_batchSize;
                 pthread_t m_pDumpMainThread;
             public:
-                WriteBuffer(int pageSize, int bufferSize, int dumpThreadNum, std::string leofsConfigPath, std::string filePath, int batchSize) {
+                WriteBuffer(int pageSize, int bufferSize, int dumpThreadNum, const std::string &leofsConfigPath, const char* filePath, int batchSize) {
                     m_pageSize = pageSize;
                     m_bufferSize = bufferSize / 2;
                     m_dumpThreadNum = dumpThreadNum;
@@ -51,11 +52,12 @@ namespace SPTAG::SPANN {
                     m_batchSize = batchSize;
                     m_pDumpMainThread = -1;
                     for (int i = 0; i < 2 * m_bufferSize; i++) {
-                        char* buffer = new char[m_bufferSize];
+                        char* buffer = new char[m_pageSize];
                         m_bufQueue.push(buffer);
                     }
                     m_cids.resize(m_dumpThreadNum, -1);
                     m_fds.resize(m_dumpThreadNum, -1);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "WriteBuffer: filePath: %s\n", filePath);
                     for (int i = 0; i < m_dumpThreadNum; i++) {
                         auto cid = dfs_connect_config(leofsConfigPath.c_str());
                         if (cid < 0) {
@@ -63,7 +65,7 @@ namespace SPTAG::SPANN {
                             exit(0);
                         }
                         m_cids[i] = cid;
-                        auto fd = dfs_open(cid, filePath.c_str(), O_WRONLY | O_CREAT, 0644);
+                        auto fd = dfs_open(cid, filePath, O_WRONLY | O_CREAT, 0644);
                         if (fd < 0) {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "WriteBuffer: open file failed\n");
                             exit(0);
@@ -74,16 +76,18 @@ namespace SPTAG::SPANN {
 
                 ~WriteBuffer() {
                     std::unique_lock<std::shared_mutex> lock(m_mutex);
+                    std::unique_lock<std::shared_mutex> dumpLock(m_dumpMutex);
+                    std::unique_lock<std::mutex> queueLock(m_queueMutex);
                     // TODO: consider dump buffer here
-                    if (m_pDumpMainThread >= 0) {
+                    if (m_isDumping) {
                         void *ret_val = nullptr;
                         pthread_join(m_pDumpMainThread, &ret_val);
+                        m_isDumping = false;
                     }
                     while (!m_bufQueue.empty()) {
-                        char* bufptr = nullptr;
-                        if (m_bufQueue.try_pop(bufptr)) {
-                            delete[] bufptr;
-                        }
+                        char* bufptr = m_bufQueue.front();
+                        m_bufQueue.pop();
+                        delete[] bufptr;
                     }
                     for (auto &it : m_buffer[0]) {
                         delete[] it.second.first;
@@ -139,6 +143,8 @@ namespace SPTAG::SPANN {
                     for (int i = 0; i < wb->m_dumpThreadNum; i++) {
                         dumpThreads[i].join();
                     }
+                    std::unique_lock<std::shared_mutex> lock(wb->m_dumpMutex);
+                    std::unique_lock<std::mutex> queueLock(wb->m_queueMutex);
                     for (auto &it : *(wb->m_pDumpBuffer)) {
                         wb->m_bufQueue.push(it.second.first);
                     }
@@ -149,7 +155,8 @@ namespace SPTAG::SPANN {
                 }
 
                 void dumpAsync() {
-                    // m_isDumping = true;
+                    std::unique_lock<std::shared_mutex> lock(m_dumpMutex);
+                    m_isDumping = true;
                     std::swap(m_pCurrBuffer, m_pDumpBuffer);
                     if (m_pDumpBuffer->size() == 0) {
                         // m_isDumping = false;
@@ -160,9 +167,10 @@ namespace SPTAG::SPANN {
 
                 void forceDump() {
                     std::unique_lock<std::shared_mutex> lock(m_mutex);
-                    if (m_pDumpMainThread >= 0) {
+                    if (m_isDumping) {
                         void *ret_val = nullptr;
                         pthread_join(m_pDumpMainThread, &ret_val);
+                        m_isDumping = false;
                     }
                     if (m_pDumpBuffer->size() > 0) {
                         pthread_create(&m_pDumpMainThread, nullptr, dump, this);
@@ -170,21 +178,33 @@ namespace SPTAG::SPANN {
                         pthread_join(m_pDumpMainThread, &ret_val);
                         m_pDumpMainThread = -1;
                     }
-                    std::swap(m_pCurrBuffer, m_pDumpBuffer);
+                    {
+                        std::unique_lock<std::shared_mutex> lock(m_dumpMutex);
+                        std::swap(m_pCurrBuffer, m_pDumpBuffer);
+                    }
                     if (m_pDumpBuffer->size() > 0) {
                         pthread_create(&m_pDumpMainThread, nullptr, dump, this);
                         void *ret_val = nullptr;
                         pthread_join(m_pDumpMainThread, &ret_val);
                         m_pDumpMainThread = -1;
                     }
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "WriteBuffer: Force dump done!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "WriteBuffer: Current buffer size: %d\n", m_pCurrBuffer->size());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "WriteBuffer: Dump buffer size: %d\n", m_pDumpBuffer->size());
                 }
 
                 bool put(AddressType addr, void *value, int size) {
                     std::unique_lock<std::shared_mutex> lock(m_mutex);
+                    
+                    if (size > m_pageSize) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "WriteBuffer: Put size too large!");
+                        return false;
+                    }
                     if (m_pCurrBuffer->size() >= m_bufferSize) {
-                        if (m_pDumpMainThread >= 0) {
+                        if (m_isDumping) {
                             void *ret_val = nullptr;
                             pthread_join(m_pDumpMainThread, &ret_val);
+                            m_isDumping = false;
                         }
                         dumpAsync();
                     }
@@ -196,22 +216,45 @@ namespace SPTAG::SPANN {
                         return true;
                     }
                     char *buf_ptr = nullptr;
-                    while(!m_bufQueue.try_pop(buf_ptr));
+                    {
+                        std::unique_lock<std::mutex> lock(m_queueMutex);
+                        if (m_bufQueue.size() > 0) {
+                            buf_ptr = m_bufQueue.front();
+                            m_bufQueue.pop();
+                        } else {
+                            return false;
+                        }
+                    }
                     memcpy(buf_ptr, value, size);
                     m_pCurrBuffer->insert(std::make_pair(addr, std::pair<char*, int>(buf_ptr, size)));
                     return true;
                 }
 
                 bool get(AddressType addr, void *value, int size) {
-                    std::shared_lock<std::shared_mutex> lock(m_mutex);
-                    auto it = m_pCurrBuffer->find(addr);
-                    if (it != m_pCurrBuffer->end()) {
-                        if (it->second.second != size) {
-                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "WriteBuffer: Get size inconsistent!");
+                    {
+                        std::shared_lock<std::shared_mutex> lock(m_mutex);
+                        auto it = m_pCurrBuffer->find(addr);
+                        if (it != m_pCurrBuffer->end()) {
+                            if (it->second.second != size) {
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "WriteBuffer: Get size inconsistent!");
+                            }
+                            memcpy(value, it->second.first, std::min(it->second.second, size));
+                            return true;
                         }
-                        memcpy(value, it->second.first, std::min(it->second.second, size));
-                        return true;
                     }
+                    
+                    {
+                        std::shared_lock<std::shared_mutex> lock(m_dumpMutex);
+                        auto it = m_pDumpBuffer->find(addr);
+                        if (it != m_pDumpBuffer->end()) {
+                            if (it->second.second != size) {
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "WriteBuffer: Get size inconsistent!");
+                            }
+                            memcpy(value, it->second.first, std::min(it->second.second, size));
+                            return true;
+                        }
+                    }
+                    
                     return false;
                 }
             };
@@ -354,8 +397,8 @@ namespace SPTAG::SPANN {
 
             bool ShutDown();
 
-            bool SetWriteBuffer(Options *opt) {
-                m_pWriteBuffer = new WriteBuffer(PageSize, opt->m_writeBufferSize, opt->m_writeBufferDumpThreadNum, m_LeoFSConfigPath, std::string(filePath), m_batchSize);
+            void SetWriteBuffer(Options *opt) {
+                m_pWriteBuffer = new WriteBuffer(PageSize, opt->m_writeBufferSize, opt->m_writeBufferDumpThreadNum, m_LeoFSConfigPath, filePath, m_batchSize);
             };
 
             int RemainBlocks() {
@@ -372,6 +415,9 @@ namespace SPTAG::SPANN {
 
             ErrorCode Checkpoint(std::string prefix) {
                 // TODO: Consider checkpoint to dfs
+                if (m_pWriteBuffer) {
+                    m_pWriteBuffer->forceDump();
+                }
                 std::string filename = prefix + "_blockpool";
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO: saving block pool\n");
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Reload reserved blocks!\n");

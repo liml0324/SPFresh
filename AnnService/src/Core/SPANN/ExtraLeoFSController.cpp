@@ -22,6 +22,7 @@ std::unique_ptr<char[]> LeoFSIO::BlockController::m_memBuffer;
 
 void* LeoFSIO::BlockController::InitializeLeoFS(void* args) {
     LeoFSIO::BlockController* ctrl = (LeoFSIO::BlockController *)args;
+    memset(filePath, 0, 1024);
     const char* LeoFSConfigPath = getenv(kLeoFSConfigPath);
     if(LeoFSConfigPath) {
         cid = dfs_connect_config(LeoFSConfigPath);

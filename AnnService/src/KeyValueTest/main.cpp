@@ -10,7 +10,7 @@ using namespace SPTAG;
 
 int main(int argc, char* argv[]) {
     int max_blocks = 5;
-    int kv_num = 100;
+    int kv_num = 1000;
     int dataset_size = 10000;
     int iter_num = 1000;
     int batch_num = 10;
@@ -37,13 +37,16 @@ int main(int argc, char* argv[]) {
     }
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Data generated\n");
     // SPANN::FileIO fileIO("/nvme0n1/lml/pbfile", 1024 * 1024, std::numeric_limits<SizeType>::max(), max_blocks * 2, 1024, 64, false);
-    SPANN::LeoFSIO leoFSIO("/testfile", 1024 * 1024, std::numeric_limits<SizeType>::max(), max_blocks * 2, 1024, 64, false);
+    SPANN::Options options;
+    options.SetParameter("BuildSSDIndex", "LeoFSConfigPath", "/home/mulong/SPFresh/ThirdParty/fs_demo/ci-client.toml");
+    options.SetParameter("BuildSSDIndex", "UseBufferedWrite", "true");
+    SPANN::LeoFSIO leoFSIO("/testfile", 1024 * 1024, std::numeric_limits<SizeType>::max(), max_blocks * 2, 1024, 64, false, 1, &options);
     leoFSIO.Initialize(true);
 
-    bool single_thread_test     = false;
-    bool multi_thread_test      = false;
+    bool single_thread_test     = true;
+    bool multi_thread_test      = true;
     bool multi_get_test         = true;
-    bool mixed_read_write_test  = false;
+    bool mixed_read_write_test  = true;
     bool timeout_test           = false;
     bool conflict_test          = false;
 
