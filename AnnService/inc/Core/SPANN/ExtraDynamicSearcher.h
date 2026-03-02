@@ -1231,6 +1231,9 @@ namespace SPTAG::SPANN {
                                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Copy to SPDK: Sent %.2lf%%...\n", index * 100.0 / totalPostingNum);
                                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Copy to SPDK: Time elapsed: %ld ms.\n", std::chrono::duration_cast<std::chrono::milliseconds>(end_time - begin_time).count());
                             }
+                            // if ((index & (1 << 16) - 1) == 0) {
+                            //     db->GetStat();
+                            // }
                             std::string tempPosting;
                             storeExtraSearcher->GetWritePosting(index, tempPosting);
                             int vectorNum = (int)(tempPosting.size() / (m_vectorInfoSize - sizeof(uint8_t)));

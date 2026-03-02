@@ -40,6 +40,8 @@ namespace SPTAG::SPANN {
                 int m_pageSize;
                 int m_bufferSize;
                 int m_batchSize;
+                std::atomic<int64_t> m_dumpedBlocks;
+                std::atomic<int64_t> m_dumpedTime;
                 pthread_t m_pDumpMainThread;
             public:
                 WriteBuffer(int pageSize, int bufferSize, int dumpThreadNum, const std::string &leofsConfigPath, const char* filePath, int batchSize) {
@@ -50,6 +52,8 @@ namespace SPTAG::SPANN {
                     m_pDumpBuffer = &m_buffer[1];
                     m_isDumping = false;
                     m_batchSize = batchSize;
+                    m_dumpedBlocks = 0;
+                    m_dumpedTime = 0;
                     m_pDumpMainThread = -1;
                     for (int i = 0; i < 2 * m_bufferSize; i++) {
                         char* buffer = new char[m_pageSize];
@@ -126,9 +130,11 @@ namespace SPTAG::SPANN {
                         }
                         dfs_multi_pwrite(cid, fd, batch, iocb_ptr.data());
                     }
+                    dfs_fsync(cid, fd);
                 }
 
                 static void* dump(void *args) {
+                    auto begin = std::chrono::high_resolution_clock::now();
                     WriteBuffer *wb = static_cast<WriteBuffer*>(args);
                     std::vector<std::vector<std::pair<AddressType, std::pair<char*, int>>>> dumpJobs(wb->m_dumpThreadNum);
                     int i = 0;
@@ -151,6 +157,8 @@ namespace SPTAG::SPANN {
                     wb->m_pDumpBuffer->clear();
                     // wb->m_isDumping = false;
                     // wb->m_cv.notify_all();
+                    auto end = std::chrono::high_resolution_clock::now();
+                    wb->m_dumpedTime += std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count();
                     return nullptr;
                 }
 
@@ -162,6 +170,7 @@ namespace SPTAG::SPANN {
                         // m_isDumping = false;
                         return;
                     }
+                    m_dumpedBlocks += m_pDumpBuffer->size();
                     pthread_create(&m_pDumpMainThread, nullptr, dump, this);
                 }
 
@@ -256,6 +265,14 @@ namespace SPTAG::SPANN {
                     }
                     
                     return false;
+                }
+
+                void getStats() {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "WriteBuffer: Buffer dump using time: %lld\n", m_dumpedTime.load());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "WriteBuffer: Buffer dumped block count: %lld\n", m_dumpedBlocks.load());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "WriteBuffer: Time for each block: %lf\n", (double)m_dumpedTime / m_dumpedBlocks);
+                    m_dumpedTime.store(0);
+                    m_dumpedBlocks.store(0);
                 }
             };
             static constexpr const char* kLeoFSPath = "SPFRESH_LEOFS_IO_PATH";
@@ -586,6 +603,138 @@ namespace SPTAG::SPANN {
                 }
                 return ErrorCode::Success;
             }
+        };
+
+        class MergeBuffer {
+        private:
+            class IndexedHeap {
+            public:
+                struct Node {
+                    int key;   // 优先级
+                    int id;    // 唯一标识
+                };
+
+                std::vector<Node> h;     // 堆数组
+                std::vector<int> pos;    // pos[id] = 在堆中的下标，-1 表示不存在
+
+                IndexedHeap(int max_id) {
+                    pos.assign(max_id + 1, -1);
+                }
+
+                bool empty() const {
+                    return h.empty();
+                }
+
+                int size() const {
+                    return h.size();
+                }
+
+                const Node& top() const {
+                    return h[0];
+                }
+
+                /* ---------- 内部工具函数 ---------- */
+
+                void swap_node(int i, int j) {
+                    std::swap(h[i], h[j]);
+                    pos[h[i].id] = i;
+                    pos[h[j].id] = j;
+                }
+
+                void sift_up(int i) {
+                    while (i > 0) {
+                        int p = (i - 1) / 2;
+                        if (h[p].key >= h[i].key) break;
+                        swap_node(p, i);
+                        i = p;
+                    }
+                }
+
+                void sift_down(int i) {
+                    int n = h.size();
+                    while (true) {
+                        int l = i * 2 + 1;
+                        int r = i * 2 + 2;
+                        int largest = i;
+
+                        if (l < n && h[l].key > h[largest].key)
+                            largest = l;
+                        if (r < n && h[r].key > h[largest].key)
+                            largest = r;
+
+                        if (largest == i) break;
+                        swap_node(i, largest);
+                        i = largest;
+                    }
+                }
+
+                /* ---------- 对外接口 ---------- */
+
+                // 插入新元素
+                void push(int id, int key) {
+                    if (pos[id] != -1) return;  // 已存在
+                    h.push_back({key, id});
+                    pos[id] = h.size() - 1;
+                    sift_up(pos[id]);
+                }
+
+                // 弹出堆顶
+                void pop() {
+                    if (h.empty()) return;
+                    int last = h.size() - 1;
+                    swap_node(0, last);
+                    pos[h[last].id] = -1;
+                    h.pop_back();
+                    if (!h.empty())
+                        sift_down(0);
+                }
+
+                // 修改任意元素的 key
+                void modify(int id, int new_key) {
+                    int i = pos[id];
+                    if (i == -1) return;
+
+                    int old = h[i].key;
+                    h[i].key = new_key;
+
+                    if (new_key > old)
+                        sift_up(i);
+                    else
+                        sift_down(i);
+                }
+
+                // 删除任意元素
+                void erase(int id) {
+                    int i = pos[id];
+                    if (i == -1) return;
+
+                    int last = h.size() - 1;
+                    swap_node(i, last);
+                    pos[h[last].id] = -1;
+                    h.pop_back();
+
+                    if (i < h.size()) {
+                        sift_up(i);
+                        sift_down(i);
+                    }
+                }
+            };
+            tbb::concurrent_hash_map<AddressType, std::string> m_buffer;
+            IndexedHeap m_heap;
+            std::queue<int> m_freeIds;
+            std::mutex m_heapMutex;
+            int size;
+            int vecSize;
+            int capacity;
+            int nowMaxId;
+
+            public:
+                MergeBuffer(int capacity, int vecSize): m_heap(capacity / vecSize + 1), size(0), vecSize(vecSize), capacity(capacity), nowMaxId(0) {}
+
+                ~MergeBuffer() {}
+
+                
+
         };
 
         class CompactionJob : public Helper::ThreadPool::Job

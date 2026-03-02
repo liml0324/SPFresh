@@ -25,10 +25,15 @@ void* LeoFSIO::BlockController::InitializeLeoFS(void* args) {
     memset(filePath, 0, 1024);
     const char* LeoFSConfigPath = getenv(kLeoFSConfigPath);
     if(LeoFSConfigPath) {
+        auto begin = std::chrono::high_resolution_clock::now();
         cid = dfs_connect_config(LeoFSConfigPath);
+        auto end = std::chrono::high_resolution_clock::now();
         if (cid < 0) {
             fprintf(stderr, "LeoFSIO::BlockController::InitializeLeoFS failed: dfs_connect_config failed\n");
             ctrl->m_LeoFSThreadStartFailed = true;
+        }
+        else {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO::BlockController::InitializeLeoFS: dfs_connect_config success, cid=%d, time elapsed: %lld us\n", cid, std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count());
         }
     } else {
         fprintf(stderr, "LeoFSIO::BlockController::InitializeLeoFS failed: No LeoFSConfigPath\n");
@@ -194,10 +199,15 @@ bool LeoFSIO::BlockController::Initialize(int batchSize) {
         }
     }
     if (cid < 0) {
+        auto begin = std::chrono::high_resolution_clock::now();
         cid = dfs_connect_config(LeoFSConfigPath);
+        auto end = std::chrono::high_resolution_clock::now();
         if (cid < 0) {
             fprintf(stderr, "LeoFSIO::BlockController::Initialize failed: dfs_connect_config failed\n");
             return false;
+        }
+        else {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LeoFSIO::BlockController::InitializeLeoFS: dfs_connect_config success, cid=%d, time elapsed: %lld us\n", cid, std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count());
         }
 
         if (fd < 0) {
@@ -995,6 +1005,9 @@ bool LeoFSIO::BlockController::IOStatistics() {
     std::cout << "dfs_multi_pread avg time: " << Sum(multi_read_time_vec) / max(Sum(multi_read_times), 1L) << "ns" << std::endl;
 
     dfs_get_io_stats();
+    if(m_pWriteBuffer) {
+        m_pWriteBuffer->getStats();
+    }
     return true;
 }
 
