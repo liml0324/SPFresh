@@ -141,6 +141,7 @@ namespace SPTAG::SPANN {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO: saving block pool\n");
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Reload reserved blocks!\n");
                 AddressType currBlockAddress = 0;
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Reserved blocks num: %d\n", m_blockAddresses_reserve.unsafe_size());
                 for (int count = 0; count < m_blockAddresses_reserve.unsafe_size(); count++) {
                     m_blockAddresses_reserve.try_pop(currBlockAddress);
                     m_blockAddresses.push(currBlockAddress);
