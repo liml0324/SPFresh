@@ -742,6 +742,7 @@ namespace SPTAG {
                 StopWSPFresh sw;
                 std::vector<std::thread> threads;
                 std::vector<double> latency_vector(updateSize);
+                std::vector<double> write_latency_vector(updateSize);
 
                 std::atomic_size_t vectorsSent(0);
 
@@ -771,12 +772,14 @@ namespace SPTAG {
                             //     1));
                             if (p_opts.m_stressTest) p_index->DeleteIndex(mapping[insertSet[index]]);
                             auto insertBegin = std::chrono::high_resolution_clock::now();
+                            double write_latency = 0;
                             if (p_opts.m_loadAllVectors)
-                                p_index->AddIndexSPFresh(vectorSet->GetVector(insertSet[index]), 1, p_opts.m_dim, &mapping[insertSet[index]]);
+                                p_index->AddIndexSPFresh(vectorSet->GetVector(insertSet[index]), 1, p_opts.m_dim, &mapping[insertSet[index]], &write_latency);
                             else
-                                p_index->AddIndexSPFresh(vectorSet->GetVector(index), 1, p_opts.m_dim, &mapping[insertSet[index]]);
+                                p_index->AddIndexSPFresh(vectorSet->GetVector(index), 1, p_opts.m_dim, &mapping[insertSet[index]], &write_latency);
                             auto insertEnd = std::chrono::high_resolution_clock::now();
                             latency_vector[index] = std::chrono::duration_cast<std::chrono::microseconds>(insertEnd - insertBegin).count();
+                            write_latency_vector[index] = write_latency;
                         }
                         else
                         {
@@ -814,6 +817,12 @@ namespace SPTAG {
                         return ss;
                     },
                     "%.3lf");
+                PrintPercentiles<double, double>(write_latency_vector,
+                    [](const double& ss) -> double
+                    {
+                        return ss;
+                    },
+                    "%.3lf", true);
             }
 
             template <typename ValueType>

@@ -259,7 +259,7 @@ namespace SPTAG
                 m_extraSearcher->Checkpoint(m_options.m_persistentBufferPath);
             }
 
-            ErrorCode AddIndexSPFresh(const void *p_data, SizeType p_vectorNum, DimensionType p_dimension, SizeType* VID) {
+            ErrorCode AddIndexSPFresh(const void *p_data, SizeType p_vectorNum, DimensionType p_dimension, SizeType* VID, double *write_latency = nullptr) {
                 if ((!m_options.m_useKV &&!m_options.m_useSPDK && !m_options.m_useFileIO && !m_options.m_useLeoFS) || m_extraSearcher == nullptr) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Only Support KV Extra Update\n");
                     return ErrorCode::Fail;
@@ -300,6 +300,9 @@ namespace SPTAG
                         GetEnumValueType<T>(), p_dimension, p_vectorNum));
                 }
 
+                if (write_latency) {
+                    return m_extraSearcher->AddIndex(vectorSet, m_index, begin, write_latency);
+                }
                 return m_extraSearcher->AddIndex(vectorSet, m_index, begin);
             }
         };

@@ -294,6 +294,8 @@ namespace SPTAG {
                 std::shared_ptr<VectorIndex> p_index) { return; }
             virtual ErrorCode AddIndex(std::shared_ptr<VectorSet>& p_vectorSet,
                 std::shared_ptr<VectorIndex> p_index, SizeType p_begin) { return ErrorCode::Undefined; }
+            virtual ErrorCode AddIndex(std::shared_ptr<VectorSet>& p_vectorSet,
+                std::shared_ptr<VectorIndex> p_index, SizeType p_begin, double *write_latency) { return ErrorCode::Undefined; }
             virtual ErrorCode DeleteIndex(SizeType p_id) { return ErrorCode::Undefined; }
 
             virtual bool AllFinished() { return false; }

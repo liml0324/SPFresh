@@ -1746,6 +1746,34 @@ namespace SPTAG::SPANN {
             return ErrorCode::Success;
         }
 
+        ErrorCode AddIndex(std::shared_ptr<VectorSet>& p_vectorSet,
+            std::shared_ptr<VectorIndex> p_index, SizeType begin, double *write_latency) override {
+            
+            *write_latency = 0;
+            for (int v = 0; v < p_vectorSet->Count(); v++) {
+                SizeType VID = begin + v;
+                std::vector<Edge> selections(static_cast<size_t>(m_opt->m_replicaCount));
+                int replicaCount;
+                RNGSelection(selections, (ValueType*)(p_vectorSet->GetVector(v)), p_index.get(), VID, replicaCount);
+
+                uint8_t version = m_versionMap->GetVersion(VID);
+                std::string appendPosting(m_vectorInfoSize, '\0');
+                Serialize((char*)(appendPosting.c_str()), VID, version, p_vectorSet->GetVector(v));
+                if (m_opt->m_enableWAL) {
+                    m_wal->PutAssignment(appendPosting);
+                }
+                auto begin = std::chrono::high_resolution_clock::now();
+                for (int i = 0; i < replicaCount; i++)
+                {
+                    // AppendAsync(selections[i].node, 1, appendPosting_ptr);
+                    Append(p_index.get(), selections[i].node, 1, appendPosting);
+                }
+                auto end = std::chrono::high_resolution_clock::now();
+                *write_latency += (double)std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
+            }
+            return ErrorCode::Success;
+        }
+
         ErrorCode DeleteIndex(SizeType p_id) override {
             if (m_opt->m_enableWAL) {
                 std::string assignment(sizeof(SizeType), '\0');
